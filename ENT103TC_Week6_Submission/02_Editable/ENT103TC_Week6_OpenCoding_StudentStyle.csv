@@ -1,0 +1,8 @@
+Source,Text / observation,Code,Pattern,Repeater or Conflict
+Badia-Melis et al. (2015),Traceability systems need connected records and quick access during recalls.,information_flow_gap,Pattern 2,Repeater
+Badia-Melis et al. (2015),Advanced tools are useful only if they can be adopted in practice.,practical_adoption,Pattern 3,Repeater
+World Economic Forum (2019),Technology alone is not enough without standards and infrastructure.,harmonised_standards,Pattern 3,Repeater
+World Economic Forum (2019),End-to-end visibility improves safety and efficiency.,end_to_end_visibility,Pattern 2,Repeater
+Wang et al. (2021),Consumer trust depends on reliable institutions and producers.,institutional_trust,Pattern 1,Repeater
+Wang et al. (2021),Trust improves safety perception and repurchase intention.,repurchase_intention,Pattern 1,Repeater
+Cross-source conflict,"Live video may look transparent, but traceability data gives stronger evidence people can verify later.",video_vs_data_proof,Insight conflict,Conflict

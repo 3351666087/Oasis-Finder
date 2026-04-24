@@ -1,0 +1,31 @@
+# Local secrets and runtime state
+.env
+.runtime/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build and scratch outputs
+tmp/
+outputs/*/preview/
+outputs/*/verification/
+outputs/*/narrative_plan.md
+*.log
+
+# Coursework instructions, backups, and duplicated submission bundles
+ENT105TC Presentation instruction.pptx
+_doc_extract.txt
+ENT103TC_Week6_Submission_3Files/
+artifacts/INF_original_backup.docx
+
+# Heavy generated model binaries
+artifacts/*.joblib
+
+# OS and IDE noise
+.DS_Store
+Thumbs.db
+.vscode/

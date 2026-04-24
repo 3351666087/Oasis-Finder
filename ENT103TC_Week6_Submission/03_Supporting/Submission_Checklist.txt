@@ -1,0 +1,9 @@
+ENT103TC Week 6 Submission Checklist
+
+Based on the lecture slide requirement, the required submission is:
+1. The filled Week 6 artefact template
+2. The codebook generated from the three collected documents
+
+This folder includes both required files in PDF form under 01_Required.
+Editable DOCX and CSV versions are in 02_Editable.
+Extra support notes are in 03_Supporting.

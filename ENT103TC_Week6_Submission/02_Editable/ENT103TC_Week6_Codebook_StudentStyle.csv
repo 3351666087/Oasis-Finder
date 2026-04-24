@@ -1,0 +1,10 @@
+Source,Excerpt / idea,Code,Short meaning,Merged pattern
+Badia-Melis et al. (2015),records need to connect across the chain,information_flow_gap,Traceability is weak when data is separated and hard to connect.,Pattern 2
+Badia-Melis et al. (2015),fast access matters during recalls,quick_traceback,A useful system should help people find source information quickly.,Pattern 2
+Badia-Melis et al. (2015),technology should be practical to use,practical_adoption,Even good tools fail if they are too hard or expensive to use.,Pattern 3
+World Economic Forum (2019),technology only helps when standards are shared,harmonised_standards,Companies need shared rules and formats to make traceability work.,Pattern 3
+World Economic Forum (2019),full chain visibility creates value,end_to_end_visibility,Traceability becomes stronger when different stages are linked together.,Pattern 2
+World Economic Forum (2019),rollout needs infrastructure and training,implementation_support,"The business still needs systems, training, and support behind the feature.",Pattern 3
+Wang et al. (2021),people trust traceable food more when institutions are reliable,institutional_trust,Trusted organisations make traceability information feel more believable.,Pattern 1
+Wang et al. (2021),producer trust affects safety feelings,producer_trust,"Consumers care about who produced the food, not only the label itself.",Pattern 1
+Wang et al. (2021),trust increases buying intention,repurchase_intention,"When trust is higher, people are more willing to buy again.",Pattern 1

@@ -1,0 +1,25 @@
+{
+  "rmse": 5.8315,
+  "mae": 4.6498,
+  "facility_count": 97,
+  "feature_importance": {
+    "tier_num": 0.37849,
+    "compliance_score": 0.04321,
+    "esg_score": 0.00559,
+    "single_source_dependency": 0.02674,
+    "geo_risk_index": 0.03302,
+    "capacity_tonnes_per_week": 0.00553,
+    "utilization_rate": 0.00475,
+    "criticality_index": 0.02664,
+    "inbound_edge_count": 0.01469,
+    "avg_reliability": 0.2203,
+    "avg_lead_time": 0.03361,
+    "avg_cold_breach": 0.00053,
+    "on_time_rate": 0.00753,
+    "shipment_count": 0.00447,
+    "traceability_score": 0.01463,
+    "inspection_pass_rate": 0.03768,
+    "critical_alerts": 0.10982,
+    "alert_count": 0.03278
+  }
+}

@@ -1,0 +1,8 @@
+Course requirement notes taken from Week 6 lecture slides:
+
+Page 35 says:
+1. Based on the missing information, collect three pieces of data.
+2. Use Taguette and apply the 4-step open-coding approach.
+3. Submit the template and the codebook as Week 6 artefacts.
+
+This submission package is built around that checklist.

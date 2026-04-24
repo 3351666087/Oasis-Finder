@@ -1,0 +1,14 @@
+PySide6
+SQLAlchemy
+PyMySQL
+pandas
+numpy
+Faker
+matplotlib
+networkx
+scikit-learn
+xgboost
+ortools
+python-dotenv
+python-docx
+pillow

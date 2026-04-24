@@ -1,0 +1,8 @@
+{
+  "rmse": 67.8914,
+  "mae": 50.535,
+  "mape": 0.0481,
+  "training_rows": 14736,
+  "validation_rows": 1440,
+  "forecast_horizon_days": 30
+}

@@ -1,0 +1,22 @@
+name: mesh_supply_chain
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - PySide6
+      - SQLAlchemy
+      - PyMySQL
+      - pandas
+      - numpy
+      - Faker
+      - matplotlib
+      - networkx
+      - scikit-learn
+      - xgboost
+      - ortools
+      - python-dotenv
+      - python-docx
+      - pillow
+
