@@ -1,0 +1,4 @@
+metric,value,note
+Risk RMSE,5.83,facility-risk model validation
+Risk MAE,4.65,facility-risk model validation
+Forecast MAPE,4.81,30-day demand forecast percent
