@@ -163,6 +163,370 @@ def load_network_data(tier_filter: str = "ALL") -> tuple[pd.DataFrame, pd.DataFr
     return nodes, edges
 
 
+def get_facility_node_detail(facility_code: str, max_stage_rows: int = 24) -> dict:
+    overview = _read_sql(
+        """
+        SELECT
+            f.id,
+            f.facility_code,
+            f.name,
+            f.tier_level,
+            f.facility_type,
+            f.cold_chain_level,
+            f.capacity_tonnes_per_week,
+            f.utilization_rate,
+            f.automation_level,
+            f.criticality_index,
+            l.country,
+            l.region,
+            l.province,
+            l.city,
+            l.district,
+            l.site_type,
+            l.latitude,
+            l.longitude,
+            l.climate_risk_index,
+            l.congestion_index,
+            o.org_code,
+            o.name AS organization_name,
+            o.org_type,
+            o.business_domain,
+            o.compliance_score,
+            o.esg_score,
+            o.single_source_dependency,
+            COALESCE(r.risk_score, 0) AS risk_score,
+            COALESCE(r.risk_level, 'unscored') AS risk_level,
+            COALESCE(r.disruption_probability, 0) AS disruption_probability,
+            r.recommended_action,
+            r.assessed_at,
+            (SELECT COUNT(*) FROM supply_edges e WHERE e.to_facility_id = f.id AND e.active = 1) AS inbound_links,
+            (SELECT COUNT(*) FROM supply_edges e WHERE e.from_facility_id = f.id AND e.active = 1) AS outbound_links,
+            (SELECT COUNT(*) FROM supplier_lots lot WHERE lot.supplier_facility_id = f.id) AS supplier_lots,
+            (SELECT COUNT(*) FROM product_batches b WHERE b.plant_facility_id = f.id) AS product_batches,
+            (SELECT COUNT(*) FROM shipments s WHERE s.source_facility_id = f.id OR s.destination_facility_id = f.id) AS shipments,
+            (SELECT COUNT(*) FROM alert_events a WHERE a.facility_id = f.id AND a.status IN ('open', 'mitigating')) AS active_alerts
+        FROM facilities f
+        JOIN organizations o ON o.id = f.organization_id
+        JOIN locations l ON l.id = f.location_id
+        LEFT JOIN risk_assessments r ON r.entity_id = f.id AND r.assessment_scope = 'facility'
+        WHERE f.facility_code = :facility_code
+        LIMIT 1
+        """,
+        params={"facility_code": facility_code},
+        parse_dates=["assessed_at"],
+    )
+    if overview.empty:
+        raise ValueError(f"Unknown facility: {facility_code}")
+
+    facility_id = int(overview.iloc[0]["id"])
+    rows: list[dict] = []
+
+    def add_row(
+        stage: str,
+        event_time,
+        site: str,
+        item_or_flow: str,
+        evidence_code: str,
+        primary_metric: str,
+        quality_or_risk: str,
+        temperature: str = "",
+        traceability: str = "",
+        commercial_use: str = "",
+    ) -> None:
+        rows.append(
+            {
+                "stage": stage,
+                "event_time": event_time,
+                "site": site,
+                "item_or_flow": item_or_flow,
+                "evidence_code": evidence_code,
+                "primary_metric": primary_metric,
+                "quality_or_risk": quality_or_risk,
+                "temperature": temperature,
+                "traceability": traceability,
+                "commercial_use": commercial_use,
+            }
+        )
+
+    edge_rows = _read_sql(
+        """
+        SELECT
+            e.edge_code,
+            f1.name AS from_name,
+            f2.name AS to_name,
+            e.tier_level,
+            e.relation_type,
+            e.lead_time_days,
+            e.transit_distance_km,
+            e.capacity_tonnes_per_week,
+            e.unit_cost,
+            e.reliability_score,
+            COALESCE(m.name, p.name, e.relation_type) AS flow_name
+        FROM supply_edges e
+        JOIN facilities f1 ON f1.id = e.from_facility_id
+        JOIN facilities f2 ON f2.id = e.to_facility_id
+        LEFT JOIN materials m ON m.id = e.material_id
+        LEFT JOIN products p ON p.id = e.product_id
+        WHERE e.active = 1 AND (e.from_facility_id = :facility_id OR e.to_facility_id = :facility_id)
+        ORDER BY e.tier_level, e.reliability_score DESC
+        LIMIT 8
+        """,
+        params={"facility_id": facility_id},
+    )
+    for _, row in edge_rows.iterrows():
+        add_row(
+            "Network link",
+            None,
+            f"{row['from_name']} -> {row['to_name']}",
+            str(row["flow_name"]),
+            str(row["edge_code"]),
+            f"{row['capacity_tonnes_per_week']:.1f} t/week | {row['lead_time_days']} days",
+            f"Reliability {row['reliability_score']:.2f} | cost {row['unit_cost']:.2f}",
+            "",
+            f"Tier {row['tier_level']}",
+            "Claims: supplier route, lead time, capacity, reliability",
+        )
+
+    lot_rows = _read_sql(
+        """
+        SELECT
+            lot.lot_code,
+            m.name AS material_name,
+            lot.harvested_on,
+            lot.produced_on,
+            lot.received_on,
+            lot.quantity_kg,
+            lot.inspection_score,
+            lot.contamination_risk,
+            lot.traceability_completeness,
+            lot.temperature_excursion_minutes
+        FROM supplier_lots lot
+        JOIN materials m ON m.id = lot.material_id
+        WHERE lot.supplier_facility_id = :facility_id
+        ORDER BY lot.received_on DESC
+        LIMIT 6
+        """,
+        params={"facility_id": facility_id},
+        parse_dates=["harvested_on", "produced_on", "received_on"],
+    )
+    for _, row in lot_rows.iterrows():
+        add_row(
+            "Ingredient lot",
+            row["received_on"],
+            str(overview.iloc[0]["city"]),
+            str(row["material_name"]),
+            str(row["lot_code"]),
+            f"{row['quantity_kg']:.1f} kg | harvested {row['harvested_on']:%Y-%m-%d}",
+            f"Inspection {row['inspection_score']:.1f} | risk {row['contamination_risk']:.2f}",
+            f"{int(row['temperature_excursion_minutes'])} min excursion",
+            f"{row['traceability_completeness'] * 100:.1f}%",
+            "Claims: ingredient source, harvest, receipt, inspection",
+        )
+
+    batch_rows = _read_sql(
+        """
+        SELECT
+            b.batch_code,
+            p.sku_code,
+            p.name AS product_name,
+            b.production_date,
+            b.expiry_date,
+            b.actual_qty,
+            b.yield_rate,
+            b.quality_score,
+            b.status,
+            b.qr_code,
+            b.recall_flag
+        FROM product_batches b
+        JOIN products p ON p.id = b.product_id
+        WHERE b.plant_facility_id = :facility_id
+        ORDER BY b.production_date DESC
+        LIMIT 6
+        """,
+        params={"facility_id": facility_id},
+        parse_dates=["production_date", "expiry_date"],
+    )
+    for _, row in batch_rows.iterrows():
+        add_row(
+            "Production batch",
+            row["production_date"],
+            str(overview.iloc[0]["city"]),
+            f"{row['sku_code']} | {row['product_name']}",
+            str(row["batch_code"]),
+            f"{row['actual_qty']:.1f} units | expires {row['expiry_date']:%Y-%m-%d}",
+            f"Quality {row['quality_score']:.1f} | yield {row['yield_rate'] * 100:.1f}%",
+            "",
+            str(row["qr_code"]),
+            "Claims: batch date, SKU, expiry, QR evidence",
+        )
+
+    shipment_rows = _read_sql(
+        """
+        SELECT
+            s.shipment_code,
+            src.name AS source_name,
+            dst.name AS destination_name,
+            COALESCE(p.name, m.name, 'general flow') AS item_name,
+            s.dispatched_at,
+            s.arrived_at,
+            s.planned_hours,
+            s.actual_hours,
+            s.distance_km,
+            s.temp_min_c,
+            s.temp_max_c,
+            s.cold_chain_breach_minutes,
+            s.on_time,
+            s.carrier_name,
+            s.route_risk_score
+        FROM shipments s
+        JOIN facilities src ON src.id = s.source_facility_id
+        JOIN facilities dst ON dst.id = s.destination_facility_id
+        LEFT JOIN products p ON p.id = s.product_id
+        LEFT JOIN supplier_lots lot ON lot.id = s.supplier_lot_id
+        LEFT JOIN materials m ON m.id = lot.material_id
+        WHERE s.source_facility_id = :facility_id OR s.destination_facility_id = :facility_id
+        ORDER BY s.dispatched_at DESC
+        LIMIT 8
+        """,
+        params={"facility_id": facility_id},
+        parse_dates=["dispatched_at", "arrived_at"],
+    )
+    for _, row in shipment_rows.iterrows():
+        add_row(
+            "Cold-chain shipment",
+            row["dispatched_at"],
+            f"{row['source_name']} -> {row['destination_name']}",
+            str(row["item_name"]),
+            str(row["shipment_code"]),
+            f"{row['distance_km']:.0f} km | {row['actual_hours']:.1f}/{row['planned_hours']:.1f} h",
+            f"On time {bool(row['on_time'])} | route risk {row['route_risk_score']:.1f}",
+            f"{row['temp_min_c']:.1f}C to {row['temp_max_c']:.1f}C | breach {int(row['cold_chain_breach_minutes'])} min",
+            str(row["carrier_name"]),
+            "Claims: dispatch, arrival, temperature, carrier",
+        )
+
+    inspection_rows = _read_sql(
+        """
+        SELECT
+            inspected_at,
+            inspection_stage,
+            entity_type,
+            pathogen_ppm,
+            residue_ppm,
+            package_integrity_score,
+            traceability_completeness,
+            result,
+            notes
+        FROM quality_inspections
+        WHERE facility_id = :facility_id
+        ORDER BY inspected_at DESC
+        LIMIT 6
+        """,
+        params={"facility_id": facility_id},
+        parse_dates=["inspected_at"],
+    )
+    for _, row in inspection_rows.iterrows():
+        add_row(
+            "Quality checkpoint",
+            row["inspected_at"],
+            str(overview.iloc[0]["city"]),
+            f"{row['entity_type']} | {row['inspection_stage']}",
+            str(row["result"]),
+            f"pathogen {row['pathogen_ppm']:.3f} ppm | residue {row['residue_ppm']:.3f} ppm",
+            f"Package {row['package_integrity_score']:.1f}",
+            "",
+            f"{row['traceability_completeness'] * 100:.1f}%",
+            "Claims: inspection stage, result, trace completeness",
+        )
+
+    inventory_rows = _read_sql(
+        """
+        SELECT
+            i.snapshot_date,
+            i.item_type,
+            COALESCE(p.name, m.name, CONCAT(i.item_type, ' ', i.item_id)) AS item_name,
+            i.on_hand_qty,
+            i.reserved_qty,
+            i.safety_stock_qty,
+            i.days_of_cover,
+            i.freshness_index
+        FROM inventory_snapshots i
+        LEFT JOIN products p ON i.item_type = 'product' AND p.id = i.item_id
+        LEFT JOIN materials m ON i.item_type = 'material' AND m.id = i.item_id
+        WHERE i.facility_id = :facility_id
+        ORDER BY i.snapshot_date DESC
+        LIMIT 5
+        """,
+        params={"facility_id": facility_id},
+        parse_dates=["snapshot_date"],
+    )
+    for _, row in inventory_rows.iterrows():
+        add_row(
+            "Inventory state",
+            row["snapshot_date"],
+            str(overview.iloc[0]["city"]),
+            str(row["item_name"]),
+            str(row["item_type"]),
+            f"on hand {row['on_hand_qty']:.1f} | reserved {row['reserved_qty']:.1f}",
+            f"cover {row['days_of_cover']:.1f} days | freshness {row['freshness_index']:.2f}",
+            "",
+            f"safety stock {row['safety_stock_qty']:.1f}",
+            "Claims: stock level, freshness, availability",
+        )
+
+    alert_rows = _read_sql(
+        """
+        SELECT
+            event_code,
+            event_type,
+            severity,
+            occurred_at,
+            status,
+            estimated_loss,
+            description
+        FROM alert_events
+        WHERE facility_id = :facility_id
+        ORDER BY occurred_at DESC
+        LIMIT 4
+        """,
+        params={"facility_id": facility_id},
+        parse_dates=["occurred_at"],
+    )
+    for _, row in alert_rows.iterrows():
+        add_row(
+            "Risk alert",
+            row["occurred_at"],
+            str(overview.iloc[0]["city"]),
+            str(row["event_type"]),
+            str(row["event_code"]),
+            f"estimated loss {float(row['estimated_loss']):,.2f}",
+            f"{row['severity']} | {row['status']}",
+            "",
+            str(row["description"]),
+            "Claims: event time, status, expected loss",
+        )
+
+    stages = pd.DataFrame(rows)
+    if not stages.empty:
+        stages["_sort_time"] = pd.to_datetime(stages["event_time"], errors="coerce")
+        stages = stages.sort_values("_sort_time", ascending=False, na_position="last")
+        stages = stages.drop(columns=["_sort_time"]).head(max_stage_rows).reset_index(drop=True)
+        stages = stages.rename(
+            columns={
+                "event_time": "time",
+                "item_or_flow": "item",
+                "evidence_code": "evidence",
+                "primary_metric": "metric",
+                "quality_or_risk": "quality_risk",
+                "temperature": "temp",
+                "traceability": "trace",
+                "commercial_use": "claim",
+            }
+        )
+
+    return {"overview": overview.iloc[0].to_dict(), "stages": stages}
+
+
 def get_batch_codes(limit: int = 200) -> list[str]:
     frame = _read_sql(
         f"""
@@ -445,4 +809,3 @@ def build_network_graph() -> nx.DiGraph:
             weight=float(edge["unit_cost"]),
         )
     return graph
-

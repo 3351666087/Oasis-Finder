@@ -10,6 +10,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -33,6 +34,7 @@ from .services import (
     get_batch_codes,
     get_batch_trace,
     get_disruptable_facilities,
+    get_facility_node_detail,
     get_forecast_series,
     get_product_options,
     get_region_options,
@@ -186,6 +188,9 @@ class DashboardTab(QWidget):
 class NetworkTab(QWidget):
     def __init__(self):
         super().__init__()
+        self._node_codes: list[str] = []
+        self._node_collection = None
+
         layout = QVBoxLayout(self)
 
         controls = QHBoxLayout()
@@ -202,22 +207,62 @@ class NetworkTab(QWidget):
         layout.addLayout(controls)
 
         splitter = QSplitter(Qt.Vertical)
+        top_splitter = QSplitter(Qt.Horizontal)
         plot_panel = QWidget()
         plot_layout = QVBoxLayout(plot_panel)
         self.canvas = PlotCanvas()
+        self.canvas.mpl_connect("pick_event", self._handle_node_pick)
         plot_layout.addWidget(self.canvas)
-        splitter.addWidget(plot_panel)
+        top_splitter.addWidget(plot_panel)
+
+        detail_panel = QWidget()
+        detail_layout = QVBoxLayout(detail_panel)
+        self.detail_box = QGroupBox("Clicked Node Detail")
+        detail_form = QFormLayout(self.detail_box)
+        self.detail_labels = {
+            key: QLabel("--")
+            for key in [
+                "identity",
+                "location",
+                "organization",
+                "capacity",
+                "risk",
+                "links",
+                "responsibility",
+            ]
+        }
+        for label in self.detail_labels.values():
+            label.setWordWrap(True)
+        detail_form.addRow("Node", self.detail_labels["identity"])
+        detail_form.addRow("Location", self.detail_labels["location"])
+        detail_form.addRow("Operator", self.detail_labels["organization"])
+        detail_form.addRow("Capacity", self.detail_labels["capacity"])
+        detail_form.addRow("Risk", self.detail_labels["risk"])
+        detail_form.addRow("Evidence", self.detail_labels["links"])
+        detail_form.addRow("Data Note", self.detail_labels["responsibility"])
+        detail_layout.addWidget(self.detail_box)
+
+        detail_layout.addWidget(QLabel("Supply-Stage Variables Displayed After Node Click"))
+        self.stage_table, self.stage_model = create_table()
+        self.stage_table.setMinimumHeight(260)
+        detail_layout.addWidget(self.stage_table)
+        top_splitter.addWidget(detail_panel)
+        top_splitter.setSizes([700, 620])
+        splitter.addWidget(top_splitter)
 
         self.table, self.table_model = create_table()
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.selectionModel().selectionChanged.connect(self._handle_table_selection)
         splitter.addWidget(self.table)
-        splitter.setSizes([420, 220])
+        splitter.setSizes([520, 220])
         layout.addWidget(splitter)
 
     def refresh(self) -> None:
         nodes, edges = load_network_data(self.tier_combo.currentText())
         graph = nx.DiGraph()
         for _, node in nodes.iterrows():
-            graph.add_node(node["facility_code"], name=node["name"], tier=node["tier_level"])
+            graph.add_node(node["facility_code"], name=node["name"], tier=node["tier_level"], risk=node["risk_score"])
         for _, edge in edges.iterrows():
             graph.add_edge(edge["from_code"], edge["to_code"], label=edge["material_name"] or edge["product_name"] or edge["relation_type"], tier=edge["tier_level"])
 
@@ -236,14 +281,73 @@ class NetworkTab(QWidget):
         ax = self.canvas.ax
         ax.clear()
         nx.draw_networkx_edges(graph, positions, ax=ax, arrows=True, arrowsize=10, edge_color="#6C757D", alpha=0.25, width=0.8)
-        nx.draw_networkx_nodes(graph, positions, ax=ax, node_color=[colors.get(graph.nodes[n]["tier"], "#ADB5BD") for n in graph.nodes], node_size=280, linewidths=0.5, edgecolors="#FFFFFF")
+        self._node_codes = list(graph.nodes)
+        self._node_collection = nx.draw_networkx_nodes(
+            graph,
+            positions,
+            ax=ax,
+            nodelist=self._node_codes,
+            node_color=[colors.get(graph.nodes[n]["tier"], "#ADB5BD") for n in self._node_codes],
+            node_size=320,
+            linewidths=0.8,
+            edgecolors="#FFFFFF",
+        )
+        self._node_collection.set_picker(8)
         label_subset = {node: node for node in list(graph.nodes)[:48]}
         nx.draw_networkx_labels(graph, positions, labels=label_subset, font_size=6, ax=ax)
-        ax.set_title("Mesh Topology with L1 / L2 / L3 Tiers", fontsize=11)
+        ax.set_title("Clickable Mesh Topology - click a node to inspect supply-stage data", fontsize=11)
         ax.axis("off")
         self.canvas.draw()
         self.summary_label.setText(f"{len(nodes)} nodes | {len(edges)} links")
         self.table_model.set_frame(nodes[["facility_code", "name", "tier_level", "facility_type", "region", "city", "risk_score"]].copy())
+        if self._node_codes:
+            self._show_node_detail(self._node_codes[0])
+
+    def _handle_node_pick(self, event) -> None:
+        if event.artist is not self._node_collection or not len(event.ind):
+            return
+        node_idx = int(event.ind[0])
+        if 0 <= node_idx < len(self._node_codes):
+            self._show_node_detail(self._node_codes[node_idx])
+
+    def _handle_table_selection(self) -> None:
+        selected = self.table.selectionModel().selectedRows()
+        if not selected or self.table_model._frame.empty:
+            return
+        row_idx = selected[0].row()
+        if 0 <= row_idx < len(self.table_model._frame):
+            self._show_node_detail(str(self.table_model._frame.iloc[row_idx]["facility_code"]))
+
+    def _show_node_detail(self, facility_code: str) -> None:
+        detail = get_facility_node_detail(facility_code)
+        overview = detail["overview"]
+        self.detail_labels["identity"].setText(
+            f"{overview['facility_code']} | {overview['name']} | {overview['tier_level']} / {overview['facility_type']}"
+        )
+        self.detail_labels["location"].setText(
+            f"{overview['country']} - {overview['province']} - {overview['city']} - {overview['district']} "
+            f"({overview['latitude']:.3f}, {overview['longitude']:.3f})"
+        )
+        self.detail_labels["organization"].setText(
+            f"{overview['organization_name']} | compliance {overview['compliance_score']:.1f} | ESG {overview['esg_score']:.1f}"
+        )
+        self.detail_labels["capacity"].setText(
+            f"{overview['capacity_tonnes_per_week']:.1f} t/week | utilization {overview['utilization_rate'] * 100:.1f}% | "
+            f"cold chain: {overview['cold_chain_level']}"
+        )
+        self.detail_labels["risk"].setText(
+            f"{overview['risk_level']} | score {overview['risk_score']:.1f} | "
+            f"disruption probability {overview['disruption_probability'] * 100:.1f}%"
+        )
+        self.detail_labels["links"].setText(
+            f"{overview['inbound_links']} inbound links | {overview['outbound_links']} outbound links | "
+            f"{overview['supplier_lots']} supplier lots | {overview['product_batches']} batches | "
+            f"{overview['shipments']} shipments | {overview['active_alerts']} active alerts"
+        )
+        self.detail_labels["responsibility"].setText(
+            "Open-source interface and schema only. Merchant-submitted values should be validated by supplier records, QR events, IoT logs, and third-party audits."
+        )
+        self.stage_model.set_frame(detail["stages"])
 
 
 class TraceabilityTab(QWidget):
@@ -443,7 +547,7 @@ class MainWindow(QMainWindow):
             QMainWindow, QWidget {
                 background: #F6F3EA;
                 color: #1D232A;
-                font-family: Bahnschrift;
+                font-family: "Segoe UI", Arial, sans-serif;
                 font-size: 11pt;
             }
             QLabel#windowTitle {
@@ -534,8 +638,7 @@ class MainWindow(QMainWindow):
 
 def run_app() -> None:
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setFont(QFont("Bahnschrift", 10))
+    app.setFont(QFont("Segoe UI", 10))
     window = MainWindow()
     window.show()
     app.exec()
-

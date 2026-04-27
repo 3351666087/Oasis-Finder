@@ -1,25 +1,51 @@
 # Oasis Finder
 
-Oasis Finder is a fresh-food supply chain intelligence prototype for Group 9. It combines a local MySQL digital twin, a PySide6 operations interface, risk scoring, demand forecasting, traceability queries, and disruption recovery simulation.
+Oasis Finder is Group 9's fresh-food supply-chain transparency prototype. The current presentation reframes the project as a merchant-facing method: when a seller displays a product's supply-chain structure, stage data, and evidence fields, users should be more willing to buy because the product feels less risky and more verifiable.
 
-The project was built for the ENT105TC / INF coursework storyline: move beyond superficial transparency and provide verifiable, decision-grade supply chain evidence.
+The repository contains a local MySQL digital twin, a PySide6 control tower, risk scoring, demand forecasting, traceability queries, disruption recovery simulation, evidence screenshots, and the final ENT105TC presentation assets.
 
-## What It Does
+## Product Premise
+
+Oasis Finder is not only a dashboard. It is a way for merchants to advertise with inspectable evidence:
+
+- Show the supplier chain behind a product page or QR scan.
+- Let users click each supply-chain node and inspect stage-level variables.
+- Present concrete values such as time, place, batch, quality, temperature, shipment, and risk.
+- Keep the code and interface open for review while making merchant data responsibility explicit.
+
+## Data Responsibility
+
+This project open-sources the interface, schema, and evidence workflow. It does not guarantee the authenticity of data submitted by a merchant, supplier, logistics provider, or large enterprise.
+
+In production, the following evidence should be validated by supplier records, QR events, IoT logs, and third-party audits:
+
+- Product identity: SKU, GTIN, QR code, batch ID, lot ID.
+- Critical tracking event: harvest, production, receiving, shipping, arrival, transformation.
+- Location: supplier, plant, warehouse, retail node, GLN or equivalent location code.
+- Time: event timestamp, production date, expiry date, dispatch time, arrival time.
+- Condition: temperature range, breach minutes, freshness index, shelf-life state.
+- Quality proof: inspection result, package score, pathogen or residue checks.
+- Evidence owner: supplier, carrier, auditor, certificate URI, evidence hash, or signed file reference.
+
+These fields follow the spirit of FDA FSMA 204 Critical Tracking Events / Key Data Elements and GS1 traceability standards.
+
+## Current Capabilities
 
 - Models a multi-tier fresh-food supply network across L1, L2, L3, core plants, downstream nodes, and service providers.
-- Traces finished product batches back to supplier lots, inspections, material usage, and shipment legs.
+- Traces product batches back to supplier lots, inspections, material usage, and shipment legs.
+- Adds a clickable Network Mesh detail panel that exposes stage-level node data after selecting a facility.
 - Trains XGBoost-based risk and demand forecasting models.
 - Simulates disruption recovery with OR-Tools allocation logic.
 - Provides a PySide6 desktop control tower with Dashboard, Network Mesh, Traceability, Forecasting, and Scenario Lab tabs.
-- Generates report assets and presentation evidence for coursework demonstration.
+- Generates report assets, UI screenshots, speaker scripts, and presentation evidence for coursework demonstration.
 
-## Current Evidence Snapshot
+## Runtime Evidence Snapshot
 
-The latest seeded runtime used for the presentation contains:
+The latest validated local runtime contains:
 
 | Evidence area | Current value |
 | --- | ---: |
-| Organisations | 79 |
+| Organizations | 79 |
 | Facilities | 97 |
 | Active supply links | 200 |
 | Supplier lots | 154 |
@@ -27,6 +53,7 @@ The latest seeded runtime used for the presentation contains:
 | Shipments | 746 |
 | Demand observations | 35,040 |
 | Risk model RMSE | 5.83 |
+| Risk model MAE | 4.65 |
 | Forecast MAPE | 4.81% |
 | Forecast horizon | 30 days |
 
@@ -34,28 +61,33 @@ The latest seeded runtime used for the presentation contains:
 
 ```text
 .
-├── app.py                         # Desktop app entry point
-├── manage.py                      # Bootstrap, training, reporting, and health commands
-├── environment.yml                # Conda environment definition
-├── requirements.txt               # Pip dependency list
-├── scripts/
-│   ├── setup_local_mysql.ps1      # Local MySQL runtime setup
-│   └── build_inf_docx.py          # Technical report generator
-├── src/mesh_supply_chain/
-│   ├── models.py                  # SQLAlchemy schema
-│   ├── seed.py                    # Synthetic digital-twin data generation
-│   ├── analytics.py               # Risk and forecast training
-│   ├── services.py                # Query and scenario service layer
-│   ├── health.py                  # End-to-end runtime health checks
-│   └── ui.py                      # PySide6 interface
-└── artifacts/
-    ├── report_assets/             # Exported report figures
-    └── ui_captures_native/        # Demonstration screenshots
+|-- app.py                         # Desktop app entry point
+|-- manage.py                      # Bootstrap, training, reporting, and health commands
+|-- environment.yml                # Conda environment definition
+|-- requirements.txt               # Pip dependency list
+|-- scripts/
+|   |-- setup_local_mysql.ps1      # Local MySQL runtime setup
+|   `-- build_inf_docx.py          # Technical report generator
+|-- src/mesh_supply_chain/
+|   |-- models.py                  # SQLAlchemy schema
+|   |-- seed.py                    # Synthetic digital-twin data generation
+|   |-- analytics.py               # Risk and forecast training
+|   |-- services.py                # Query, node-detail, and scenario service layer
+|   |-- health.py                  # End-to-end runtime health checks
+|   `-- ui.py                      # PySide6 interface
+|-- artifacts/
+|   |-- report_assets/             # Exported report figures
+|   `-- ui_captures_native/        # Demonstration screenshots
+`-- outputs/
+    `-- oasis-finder-group9-ent105tc-rebuild/
+        |-- output.pptx
+        |-- speaker_script_rebuild_Rui_Zixiu.md
+        `-- speaker_script_rebuild_Rui_Zixiu.pdf
 ```
 
 ## Quick Start
 
-Create the environment:
+Create and activate the environment:
 
 ```powershell
 conda env create -f environment.yml
@@ -86,19 +118,12 @@ Start the desktop application:
 python .\app.py
 ```
 
-## Engineering Notes
+## Final Presentation
 
-- Database URLs are created with SQLAlchemy `URL.create`, so passwords with special characters such as `#` are handled safely.
-- Engines use `pool_pre_ping`, connection timeout, and pool recycling to improve local demo reliability.
-- The `health-check` command validates database connectivity, table scale, dashboard services, traceability flow, forecasting flow, scenario simulation, and evidence artifacts.
-- Runtime state, local credentials, caches, temporary previews, and heavy model binaries are intentionally excluded from GitHub.
-
-## Presentation
-
-The polished ENT105TC presentation deck is available in:
+The rebuilt ENT105TC deck is available at:
 
 ```text
-outputs/oasis-finder-group9-ent105tc-final/output.pptx
+outputs/oasis-finder-group9-ent105tc-rebuild/output.pptx
 ```
 
-After publishing, the first slide contains the GitHub repository link and the deck includes a browser screenshot of the repository page.
+The deck includes the reframed questionnaire logic, merchant value argument, clickable node-detail product proof, GitHub/open-source evidence, 8-minute speaker flow, and APA-style source links.
