@@ -80,7 +80,8 @@ The latest validated local runtime contains:
 |   `-- ui_captures_native/        # Demonstration screenshots
 `-- outputs/
     `-- oasis-finder-group9-ent105tc-rebuild/
-        |-- output.pptx
+        |-- output_revised.pptx
+        |-- chart_data/
         |-- speaker_script_rebuild_Rui_Zixiu.md
         `-- speaker_script_rebuild_Rui_Zixiu.pdf
 ```
@@ -123,7 +124,7 @@ python .\app.py
 The rebuilt ENT105TC deck is available at:
 
 ```text
-outputs/oasis-finder-group9-ent105tc-rebuild/output.pptx
+outputs/oasis-finder-group9-ent105tc-rebuild/output_revised.pptx
 ```
 
-The deck includes the reframed questionnaire logic, merchant value argument, clickable node-detail product proof, GitHub/open-source evidence, 8-minute speaker flow, and APA-style source links.
+The deck includes the reframed questionnaire logic, CSV-backed charts, merchant value argument, clickable node-detail product proof, GitHub/open-source evidence, merchant A/B test validation plan, and APA-style source links.

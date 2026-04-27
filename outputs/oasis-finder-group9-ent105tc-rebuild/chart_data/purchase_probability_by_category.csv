@@ -1,0 +1,7 @@
+category,chart_label,score,reason
+Cake / bakery,Cake,4.8,freshness + ingredients + allergy trust
+Seafood,Seafood,4.7,cold-chain and origin risk
+Meat,Meat,4.6,safety expiry inspection
+Dairy,Dairy,4.4,safety expiry inspection
+Ready-to-eat,Ready meal,4.2,handling history and hygiene
+Beverage,Beverage,3.0,lower freshness sensitivity

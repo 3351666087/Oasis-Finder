@@ -26,7 +26,7 @@ The old second slide focused on strategic groups. We removed that because the re
 
 Our questionnaire asks: if a merchant shows supplier nodes, time, place, quality checks, temperature, and batch movement, are users more likely to buy?
 
-The directional result is strongest for products where users worry about freshness and safety. For example, cake and bakery products need ingredient and allergy trust. Seafood needs cold-chain and origin proof. Meat, dairy, and ready-to-eat meals need safety, expiry, inspection, and handling evidence.
+The chart is now backed by CSV data. The directional result is strongest for products where users worry about freshness and safety. For example, cake and bakery products need ingredient and allergy trust. Seafood needs cold-chain and origin proof. Meat, dairy, and ready-to-eat meals need safety, expiry, inspection, and handling evidence.
 
 So our research focus is now buyer behavior: transparency is not decoration. It is a decision cue.
 
@@ -118,15 +118,19 @@ The value model is indexed, not a guaranteed forecast. The idea is that a transp
 
 For advertising, the message becomes very simple: scan the product journey, not just the package.
 
-### Slide 10 - 8-Minute Flow
+### Slide 10 - Pilot A/B Test
 
-中文提示：这一页可以快速带过，也可以救场。
+中文提示：这一页讲下一步怎么证明真的能提高商家收益。
 
-This slide is our speaking plan.
+This slide shows the next validation step: a merchant A/B test.
 
-Rui covers the premise, questionnaire direction, commercial mechanism, required fields, and build story. I cover the product proof, GitHub openness, technical capability, merchant ROI, and closing.
+After the questionnaire signal, we should test real purchase behavior. The setup is simple: same product, same price, two product pages. One page is the baseline page. The other page uses Oasis Finder to show supply-chain evidence.
 
-The deck is designed with big claims and large text so we can read from the slides if needed.
+The product cells should include cake, seafood, meat, dairy, and ready-to-eat meals because freshness and safety concerns are high.
+
+The outcome metrics should include QR scan rate, evidence-panel clicks, add-to-cart, purchase conversion, willingness-to-pay, and repeat intent.
+
+The decision rule is also clear: adopt the method when purchase lift and trust lift both improve without increasing confusion.
 
 ### Slide 11 - Close
 
