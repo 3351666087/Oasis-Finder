@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
 python-multipart
+PySide6
+pyinstaller
 SQLAlchemy
 PyMySQL
 pandas

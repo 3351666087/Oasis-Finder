@@ -5,7 +5,8 @@ param(
     [string]$DatabaseName = "mesh_supply_chain",
     [string]$AppUser = "mesh_user",
     [string]$AppPassword = "MeshUser#2026",
-    [string]$RootPassword = "MeshRoot#2026"
+    [string]$RootPassword = "MeshRoot#2026",
+    [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,7 +42,11 @@ function Convert-ToMySqlPath {
     return ($RawPath -replace "\\", "/")
 }
 
-$projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+if ($ProjectRoot) {
+    $projectRoot = Resolve-Path $ProjectRoot
+} else {
+    $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+}
 $runtimeRoot = Join-Path $projectRoot ".runtime\mysql"
 $dataDir = Join-Path $runtimeRoot "data"
 $tmpDir = Join-Path $runtimeRoot "tmp"
