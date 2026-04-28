@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -485,7 +485,7 @@ function ProductDissection({ detail, selectedModule, setSelectedModule, t }) {
               onClick={() => setSelectedModule(module.module_id)}
             >
               <span>{module.module_category}</span>
-              <strong>{module.module_name}</strong>
+              <strong>{moduleDisplayName(module)}</strong>
               <small>{module.supplier_tier || "L?"} · {module.supplier_city || "mapped supplier"} · score {Number(module.module_score || 0).toFixed(1)}</small>
             </button>
           ))}
@@ -511,9 +511,33 @@ function IconPlaceholder({ label }) {
   return <div className="icon-placeholder">{label.split(" ").map((word) => word[0]).join("").slice(0, 2)}</div>;
 }
 
+function nodeKey(node) {
+  return String(node?.facility_code || "");
+}
+
+function edgeKey(edge) {
+  return String(edge?.edge_id || `${edge?.from_code || ""}|${edge?.to_code || ""}|${edge?.stage || ""}|${edge?.evidence || ""}`);
+}
+
+function nodeDisplayName(node) {
+  return node?.display_name || node?.facility_name || node?.facility_code || "Supply-chain node";
+}
+
+function moduleDisplayName(module) {
+  return module?.display_module_name || module?.module_name || module?.module_id || "Product module";
+}
+
+function clampCanvasPercent(value) {
+  return Math.max(4, Math.min(96, Number(value) || 50));
+}
+
 function RouteExplorer({ route, selectedModule, detail, t }) {
-  const nodes = route?.nodes || [];
-  const edges = route?.edges || [];
+  return <RouteMeshExplorer route={route} selectedModule={selectedModule} detail={detail} t={t} />;
+}
+
+function RouteMeshExplorer({ route, selectedModule, detail, t }) {
+  const nodes = useMemo(() => route?.nodes || [], [route]);
+  const edges = useMemo(() => route?.edges || [], [route]);
   const selectedModulePayload = detail.modules.find((module) => module.module_id === selectedModule);
   const layerOptions = useMemo(() => ["ALL", ...Array.from(new Set(nodes.map((node) => node.tier).filter(Boolean)))], [nodes]);
   const [layer, setLayer] = useState("ALL");
@@ -524,14 +548,21 @@ function RouteExplorer({ route, selectedModule, detail, t }) {
     setActiveNodeCode("");
   }, [selectedModule]);
 
-  const filteredNodes = layer === "ALL" ? nodes : nodes.filter((node) => node.tier === layer);
-  const activeNode = filteredNodes.find((node) => node.facility_code === activeNodeCode) || filteredNodes[0];
-  const groups = useMemo(() => {
-    const order = ["Ingredient source", "Processing / packing", "Distribution center", "Retail shelf", "Logistics node"];
-    return order
-      .map((stage) => ({ stage, nodes: filteredNodes.filter((node) => node.stage === stage) }))
-      .filter((group) => group.nodes.length);
-  }, [filteredNodes]);
+  const visibleNodes = useMemo(() => {
+    const filtered = layer === "ALL" ? nodes : nodes.filter((node) => node.tier === layer);
+    return filtered.map((node, index) => ({
+      ...node,
+      mesh_x: clampCanvasPercent(node.mesh_x ?? 12 + (index % 5) * 18),
+      mesh_y: clampCanvasPercent(node.mesh_y ?? 16 + Math.floor(index / 5) * 18),
+    }));
+  }, [nodes, layer]);
+  const visibleCodes = useMemo(() => new Set(visibleNodes.map(nodeKey)), [visibleNodes]);
+  const visibleEdges = useMemo(
+    () => edges.filter((edge) => visibleCodes.has(String(edge.from_code)) && visibleCodes.has(String(edge.to_code))),
+    [edges, visibleCodes],
+  );
+  const nodeMap = useMemo(() => new Map(visibleNodes.map((node) => [nodeKey(node), node])), [visibleNodes]);
+  const activeNode = nodeMap.get(activeNodeCode) || visibleNodes[0];
 
   const evidence = selectedModule === "whole"
     ? detail.evidence.slice(0, 5)
@@ -546,7 +577,7 @@ function RouteExplorer({ route, selectedModule, detail, t }) {
         [t.variables.qr, detail.overview.qr_code],
       ]
     : [
-        [t.variables.module, selectedModulePayload?.module_name],
+        [t.variables.module, moduleDisplayName(selectedModulePayload)],
         [t.variables.supplierCity, selectedModulePayload?.supplier_city],
         [t.variables.lot, selectedModulePayload?.lot_code],
         [t.variables.received, formatDate(selectedModulePayload?.received_on)],
@@ -568,24 +599,44 @@ function RouteExplorer({ route, selectedModule, detail, t }) {
           </button>
         ))}
       </div>
-      <div className="route-canvas" key={`${selectedModule}-${layer}`}>
-        {groups.map((group, index) => (
-          <div className="route-stage" key={group.stage}>
-            <h3>{group.stage}</h3>
-            {group.nodes.map((node) => (
-              <button
-                className={`route-node ${activeNode?.facility_code === node.facility_code ? "active" : ""}`}
-                key={node.facility_code}
-                onClick={() => setActiveNodeCode(node.facility_code)}
-              >
-                <strong>{node.facility_code}</strong>
-                <span>{node.tier} · {node.city} · {node.role}</span>
-              </button>
-            ))}
-            {index < groups.length - 1 && <div className="route-arrow">→</div>}
-          </div>
+
+      <div className="route-mesh" key={`${selectedModule}-${layer}`}>
+        <svg className="mesh-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <marker id="meshArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" />
+            </marker>
+          </defs>
+          {visibleEdges.map((edge) => {
+            const from = nodeMap.get(String(edge.from_code));
+            const to = nodeMap.get(String(edge.to_code));
+            if (!from || !to) return null;
+            return (
+              <line
+                key={edgeKey(edge)}
+                x1={from.mesh_x}
+                y1={from.mesh_y}
+                x2={to.mesh_x}
+                y2={to.mesh_y}
+                markerEnd="url(#meshArrow)"
+              />
+            );
+          })}
+        </svg>
+        {visibleNodes.map((node) => (
+          <button
+            key={nodeKey(node)}
+            className={`mesh-node ${activeNode?.facility_code === node.facility_code ? "active" : ""}`}
+            style={{ left: `${node.mesh_x}%`, top: `${node.mesh_y}%` }}
+            onClick={() => setActiveNodeCode(nodeKey(node))}
+          >
+            <span>{node.tier || "node"} · {node.stage || "stage"}</span>
+            <strong>{nodeDisplayName(node)}</strong>
+            <small>{node.city || "--"} · {node.role || node.facility_type || "--"}</small>
+          </button>
         ))}
       </div>
+
       <NodeDetail node={activeNode} t={t} />
       <EvidenceMatrix variables={variableSet} />
       <div className="proof-panel">
@@ -601,7 +652,7 @@ function RouteExplorer({ route, selectedModule, detail, t }) {
         ) : (
           <p>{t.nodeHint}</p>
         )}
-        <span className="edge-count">{edges.length} {t.flowLinks}</span>
+        <span className="edge-count">{visibleEdges.length} {t.flowLinks}</span>
       </div>
     </section>
   );
@@ -613,7 +664,7 @@ function NodeDetail({ node, t }) {
     <div className="node-detail-panel">
       <div>
         <span>{t.nodeDetail}</span>
-        <strong>{node.facility_name || node.facility_code}</strong>
+        <strong>{nodeDisplayName(node)}</strong>
       </div>
       <p>{node.visible_value || t.nodeHint}</p>
       <div className="node-detail-grid">
@@ -758,6 +809,71 @@ function MerchantStudio({ lang, setLang, t }) {
   );
 }
 
+function defaultDetailRecord(sectionKey, detail) {
+  const now = Date.now();
+  const nodes = detail?.route?.nodes || [];
+  if (sectionKey === "modules") {
+    return {
+      module_id: `custom-module-${now}`,
+      module_name: "New product component",
+      module_category: "Editable component",
+      supplier_tier: "L2",
+      supplier_city: "Editable city",
+      lot_code: `LOT-${now}`,
+      received_on: new Date().toISOString().slice(0, 10),
+      inspection_score: 90,
+      traceability_completeness: 0.9,
+      temperature_excursion_minutes: 0,
+      plain_language: "This component has editable supplier, lot, inspection, and traceability data.",
+    };
+  }
+  if (sectionKey === "route_nodes") {
+    return {
+      facility_code: `custom-node-${now}`,
+      display_name: "New supply-chain checkpoint",
+      facility_name: "New supply-chain checkpoint",
+      stage: "Ingredient source",
+      tier: "L2",
+      facility_type: "editable_checkpoint",
+      city: "Editable city",
+      role: "Editable role",
+      visible_value: "Add time, location, lot, temperature, quality, and certificate data here.",
+      mesh_x: 28,
+      mesh_y: 48,
+    };
+  }
+  if (sectionKey === "route_edges") {
+    const from = nodes[0]?.facility_code || "";
+    const to = nodes[1]?.facility_code || "";
+    return {
+      from_code: from,
+      to_code: to,
+      flow: "Editable material / proof flow",
+      stage: "custom_link",
+      evidence: `custom-link-${now}`,
+      metric: "lead time | quantity | release status",
+      quality_risk: "Editable risk note",
+      temperature: "Editable temperature band",
+      traceability: "Editable traceability rule",
+    };
+  }
+  if (sectionKey === "evidence") {
+    return {
+      stage: "Editable proof stage",
+      time: new Date().toISOString().slice(0, 10),
+      location: "Editable location",
+      item: detail?.overview?.product_name || "Editable item",
+      evidence: `EV-${now}`,
+      metric: "Editable metric",
+      quality_risk: "Editable quality / risk",
+      temp: "Editable temperature",
+      trace: "Editable traceability",
+      consumer_message: "Write the customer-facing proof message here.",
+    };
+  }
+  return {};
+}
+
 function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
   const sections = useMemo(() => [
     {
@@ -774,23 +890,23 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
       idField: "module_id",
       items: detail.modules,
       fields: ["module_name", "module_category", "supplier_tier", "supplier_city", "lot_code", "received_on", "inspection_score", "traceability_completeness", "temperature_excursion_minutes", "plain_language"],
-      labelOf: (item) => `${item.module_id} · ${item.module_name}`,
+      labelOf: (item) => `${moduleDisplayName(item)} · ${item.module_category || ""}`,
     },
     {
       key: "route_nodes",
       label: t.admin.sections.route_nodes,
       idField: "facility_code",
       items: detail.route.nodes,
-      fields: ["stage", "tier", "facility_code", "facility_name", "facility_type", "city", "role", "visible_value"],
-      labelOf: (item) => `${item.tier || "L?"} · ${item.facility_code} · ${item.city || ""}`,
+      fields: ["stage", "tier", "facility_code", "display_name", "facility_name", "facility_type", "city", "role", "visible_value", "mesh_x", "mesh_y"],
+      labelOf: (item) => `${item.tier || "L?"} · ${nodeDisplayName(item)} · ${item.city || ""}`,
     },
     {
       key: "route_edges",
       label: t.admin.sections.route_edges,
       idField: "edge_id",
       items: detail.route.edges,
-      fields: ["from_code", "to_code", "flow", "evidence", "metric", "quality_risk", "temperature", "traceability"],
-      labelOf: (item) => `${item.from_code} → ${item.to_code}`,
+      fields: ["from_code", "to_code", "stage", "flow", "evidence", "metric", "quality_risk", "temperature", "traceability"],
+      labelOf: (item) => `${nodeDisplayName(detail.route.nodes.find((node) => node.facility_code === item.from_code))} → ${nodeDisplayName(detail.route.nodes.find((node) => node.facility_code === item.to_code))}`,
     },
     {
       key: "evidence",
@@ -809,8 +925,13 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
   const [draft, setDraft] = useState({});
 
   useEffect(() => {
-    setSelectedId(String(activeSection.items[0]?.[activeSection.idField] || ""));
-  }, [sectionKey, detail]);
+    const ids = activeSection.items.map((item) => String(item[activeSection.idField]));
+    if (!ids.length) {
+      setSelectedId("");
+    } else if (!ids.includes(selectedId)) {
+      setSelectedId(ids[0]);
+    }
+  }, [sectionKey, detail, activeSection, selectedId]);
 
   useEffect(() => {
     const next = {};
@@ -823,6 +944,7 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
   }, [currentItem, sectionKey]);
 
   const saveLayer = async () => {
+    if (!currentItem) return;
     setStatus("Saving layer data...");
     await api(`/api/admin/products/${sku}/detail`, {
       method: "PATCH",
@@ -833,7 +955,34 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
       }),
     });
     setStatus(t.admin.saved);
-    onSaved();
+    await onSaved();
+  };
+
+  const createRecord = async () => {
+    if (activeSection.key === "overview") return;
+    setStatus("Creating record...");
+    const result = await api(`/api/admin/products/${sku}/detail`, {
+      method: "POST",
+      body: JSON.stringify({
+        section: activeSection.key,
+        item: defaultDetailRecord(activeSection.key, detail),
+      }),
+    });
+    setStatus("Created. You can rename it now.");
+    await onSaved();
+    setSelectedId(result.item_id);
+  };
+
+  const deleteRecord = async () => {
+    if (activeSection.key === "overview" || !currentItem) return;
+    const itemId = String(currentItem[activeSection.idField]);
+    setStatus("Deleting record...");
+    await api(`/api/admin/products/${sku}/detail/${activeSection.key}/${encodeURIComponent(itemId)}`, {
+      method: "DELETE",
+    });
+    setSelectedId("");
+    setStatus("Deleted. Customer page will refresh automatically.");
+    await onSaved();
   };
 
   return (
@@ -853,9 +1002,23 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
           </button>
         ))}
       </div>
+      <div className="editor-actions">
+        {activeSection.key !== "overview" && <button onClick={createRecord}>Add record</button>}
+        {activeSection.key !== "overview" && currentItem && <button className="danger-action" onClick={deleteRecord}>Delete selected</button>}
+      </div>
+      {["route_nodes", "route_edges"].includes(sectionKey) && (
+        <MeshEditor
+          sku={sku}
+          detail={detail}
+          selectedId={selectedId}
+          setSelectedId={setSelectedId}
+          onSaved={onSaved}
+          setStatus={setStatus}
+        />
+      )}
       <label className="field">
         <span>{t.admin.selectRecord}</span>
-        <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+        <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)} disabled={!activeSection.items.length}>
           {activeSection.items.map((item) => (
             <option key={String(item[activeSection.idField])} value={String(item[activeSection.idField])}>
               {activeSection.labelOf(item)}
@@ -876,6 +1039,190 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
       </div>
       <button className="primary-action" onClick={saveLayer}>{t.admin.saveLayer}</button>
     </section>
+  );
+}
+
+function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus }) {
+  const canvasRef = useRef(null);
+  const [nodes, setNodes] = useState(detail.route.nodes || []);
+  const [connectFrom, setConnectFrom] = useState("");
+  const [dragging, setDragging] = useState(null);
+
+  useEffect(() => {
+    setNodes(detail.route.nodes || []);
+  }, [detail]);
+
+  const edges = detail.route.edges || [];
+  const selectedNode = nodes.find((node) => node.facility_code === selectedId) || nodes[0];
+  const nodeMap = useMemo(() => new Map(nodes.map((node) => [nodeKey(node), node])), [nodes]);
+
+  const pointFromEvent = (event) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 50, y: 50 };
+    return {
+      x: clampCanvasPercent(((event.clientX - rect.left) / rect.width) * 100),
+      y: clampCanvasPercent(((event.clientY - rect.top) / rect.height) * 100),
+    };
+  };
+
+  const patchNode = async (node, updates) => {
+    await api(`/api/admin/products/${sku}/detail`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        section: "route_nodes",
+        item_id: String(node.facility_code),
+        updates,
+      }),
+    });
+  };
+
+  const addNode = async () => {
+    setStatus("Adding node...");
+    const result = await api(`/api/admin/products/${sku}/detail`, {
+      method: "POST",
+      body: JSON.stringify({
+        section: "route_nodes",
+        item: defaultDetailRecord("route_nodes", detail),
+      }),
+    });
+    setStatus("Node added. Rename it and drag it into place.");
+    await onSaved();
+    setSelectedId(result.item_id);
+  };
+
+  const deleteNode = async () => {
+    if (!selectedNode) return;
+    setStatus("Deleting node and connected links...");
+    await api(`/api/admin/products/${sku}/detail/route_nodes/${encodeURIComponent(selectedNode.facility_code)}`, {
+      method: "DELETE",
+    });
+    setSelectedId("");
+    setStatus("Node deleted.");
+    await onSaved();
+  };
+
+  const addEdge = async (fromCode, toCode) => {
+    if (!fromCode || !toCode || fromCode === toCode) return;
+    const from = nodeMap.get(fromCode);
+    const to = nodeMap.get(toCode);
+    setStatus("Creating link...");
+    await api(`/api/admin/products/${sku}/detail`, {
+      method: "POST",
+      body: JSON.stringify({
+        section: "route_edges",
+        item: {
+          from_code: fromCode,
+          to_code: toCode,
+          flow: `${nodeDisplayName(from)} to ${nodeDisplayName(to)}`,
+          stage: "merchant_drawn_link",
+          evidence: `manual-link-${Date.now()}`,
+          metric: "editable lead time | quantity | handoff status",
+          quality_risk: "editable risk, release, or exception note",
+          temperature: "editable temperature band",
+          traceability: "merchant-defined relationship",
+        },
+      }),
+    });
+    setConnectFrom("");
+    setStatus("Link created.");
+    await onSaved();
+  };
+
+  const handleNodeClick = async (node) => {
+    const code = nodeKey(node);
+    if (!connectFrom) {
+      setSelectedId(code);
+      return;
+    }
+    await addEdge(connectFrom, code);
+  };
+
+  const handlePointerDown = (event, node) => {
+    if (connectFrom) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setSelectedId(nodeKey(node));
+    setDragging({ code: nodeKey(node), moved: false });
+  };
+
+  const handlePointerMove = (event) => {
+    if (!dragging) return;
+    const point = pointFromEvent(event);
+    setDragging({ ...dragging, moved: true, point });
+    setNodes((current) => current.map((node) => (
+      nodeKey(node) === dragging.code ? { ...node, mesh_x: point.x, mesh_y: point.y } : node
+    )));
+  };
+
+  const handlePointerUp = async () => {
+    if (!dragging) return;
+    const node = nodes.find((item) => nodeKey(item) === dragging.code);
+    const point = dragging.point || { x: node?.mesh_x, y: node?.mesh_y };
+    setDragging(null);
+    if (node && point.x != null && point.y != null) {
+      await patchNode(node, { mesh_x: Number(point.x).toFixed(2), mesh_y: Number(point.y).toFixed(2) });
+      await onSaved();
+    }
+  };
+
+  return (
+    <div className="mesh-editor">
+      <div className="mesh-toolbar">
+        <button onClick={addNode}>Add node</button>
+        <button
+          className={connectFrom ? "active" : ""}
+          onClick={() => setConnectFrom(connectFrom ? "" : nodeKey(selectedNode))}
+          disabled={!selectedNode}
+        >
+          {connectFrom ? "Pick target node" : "Connect from selected"}
+        </button>
+        <button className="danger-action" onClick={deleteNode} disabled={!selectedNode}>Delete node</button>
+      </div>
+      <div
+        className="mesh-editor-canvas"
+        ref={canvasRef}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+      >
+        <svg className="mesh-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <marker id="adminMeshArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" />
+            </marker>
+          </defs>
+          {edges.map((edge) => {
+            const from = nodeMap.get(String(edge.from_code));
+            const to = nodeMap.get(String(edge.to_code));
+            if (!from || !to) return null;
+            return (
+              <line
+                key={edgeKey(edge)}
+                x1={clampCanvasPercent(from.mesh_x)}
+                y1={clampCanvasPercent(from.mesh_y)}
+                x2={clampCanvasPercent(to.mesh_x)}
+                y2={clampCanvasPercent(to.mesh_y)}
+                markerEnd="url(#adminMeshArrow)"
+              />
+            );
+          })}
+        </svg>
+        {nodes.map((node) => (
+          <button
+            key={nodeKey(node)}
+            className={`mesh-node admin ${selectedNode?.facility_code === node.facility_code ? "active" : ""} ${connectFrom === node.facility_code ? "source" : ""}`}
+            style={{ left: `${clampCanvasPercent(node.mesh_x)}%`, top: `${clampCanvasPercent(node.mesh_y)}%` }}
+            onClick={() => handleNodeClick(node)}
+            onPointerDown={(event) => handlePointerDown(event, node)}
+          >
+            <span>{node.tier || "node"} · {node.stage || "stage"}</span>
+            <strong>{nodeDisplayName(node)}</strong>
+          </button>
+        ))}
+      </div>
+      <p className="mesh-help">
+        Canvas logic: add checkpoints, drag nodes to reshape the mesh, then connect two nodes to express supplier, QC, packaging, logistics, or retail handoffs.
+      </p>
+    </div>
   );
 }
 
