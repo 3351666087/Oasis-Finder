@@ -1047,6 +1047,34 @@ def get_product_journey(sku_code: str) -> dict:
         route_nodes = route_nodes.sort_values(["stage_order", "facility_name"]).reset_index(drop=True)
 
     route_edges = pd.DataFrame(route_edge_rows)
+    media_slots = pd.DataFrame(
+        [
+            {
+                "slot": "Product photo",
+                "interface_key": "merchant_media.product_packshot_url",
+                "placeholder": f"merchant_media/{sku_code}/packshot.png",
+                "why": "Let shoppers recognize the exact product before reading proof.",
+            },
+            {
+                "slot": "Origin / farm image",
+                "interface_key": "merchant_media.origin_image_url",
+                "placeholder": f"merchant_media/{sku_code}/origin.jpg",
+                "why": "Show where the main ingredient or supplier lot comes from.",
+            },
+            {
+                "slot": "Quality certificate",
+                "interface_key": "merchant_media.qc_certificate_url",
+                "placeholder": f"merchant_media/{sku_code}/qc_certificate.png",
+                "why": "Make the inspection result easy to trust and review.",
+            },
+            {
+                "slot": "Cold-chain proof",
+                "interface_key": "merchant_media.temperature_log_url",
+                "placeholder": f"merchant_media/{sku_code}/temperature_log.png",
+                "why": "Show temperature evidence for delivery and shelf confidence.",
+            },
+        ]
+    )
     evidence = pd.DataFrame(evidence_rows)
     if not evidence.empty:
         evidence["_sort_time"] = pd.to_datetime(evidence["time"], errors="coerce")
@@ -1071,6 +1099,7 @@ def get_product_journey(sku_code: str) -> dict:
         "overview": overview,
         "route_nodes": route_nodes,
         "route_edges": route_edges,
+        "media_slots": media_slots,
         "evidence": evidence,
     }
 

@@ -46,6 +46,7 @@ These fields follow the spirit of FDA FSMA 204 Critical Tracking Events / Key Da
 
 - Models a multi-tier fresh-food supply network across L1, L2, L3, core plants, downstream nodes, and service providers.
 - Adds a product-first home tab where merchants can show product names and categories before users inspect a SKU-level supply route.
+- Reserves merchant media slots for product photo, origin image, quality certificate, and cold-chain log; icon placeholders are displayed until real merchant assets are uploaded.
 - Traces product batches back to supplier lots, inspections, material usage, and shipment legs.
 - Adds a clickable Network Mesh detail panel that exposes stage-level node data after selecting a facility.
 - Trains XGBoost-based risk and demand forecasting models.
@@ -91,7 +92,7 @@ The latest validated local runtime contains:
 |   `-- ui.py                      # PySide6 interface
 |-- artifacts/
 |   |-- report_assets/             # Exported report figures
-|   `-- ui_captures_native/        # Demonstration screenshots, including product_shelf_cp_route.png
+|   `-- ui_captures_native/        # Demonstration screenshots, including product_shelf_media_slots.png
 `-- outputs/
     `-- oasis-finder-group9-ent105tc-rebuild-v2/
         |-- output.pptx

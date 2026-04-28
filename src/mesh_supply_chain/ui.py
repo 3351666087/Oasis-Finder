@@ -7,7 +7,7 @@ import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -115,6 +115,96 @@ class KpiCard(QFrame):
         self.subtitle_label.setText(subtitle)
 
 
+class MerchantImageSlot(QFrame):
+    def __init__(self, title: str, interface_key: str, why: str, accent: str, icon_kind: str):
+        super().__init__()
+        self.setObjectName("imageSlot")
+        self.interface_key = interface_key
+        self.why = why
+        self.placeholder_label = ""
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(10)
+
+        icon = QLabel()
+        icon.setPixmap(self._build_icon(accent, icon_kind))
+        icon.setFixedSize(48, 48)
+        layout.addWidget(icon)
+
+        copy = QVBoxLayout()
+        copy.setSpacing(2)
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("slotTitle")
+        self.path_label = QLabel(interface_key)
+        self.path_label.setObjectName("slotPath")
+        self.path_label.setWordWrap(True)
+        self.why_label = QLabel(why)
+        self.why_label.setObjectName("slotWhy")
+        self.why_label.setWordWrap(True)
+        copy.addWidget(self.title_label)
+        copy.addWidget(self.path_label)
+        copy.addWidget(self.why_label)
+        layout.addLayout(copy, 1)
+
+    def update_slot(self, placeholder: str, why: str | None = None) -> None:
+        self.placeholder_label = placeholder
+        self.path_label.setText(f"{self.interface_key}\nplaceholder: {placeholder}")
+        if why:
+            self.why_label.setText(why)
+
+    def _build_icon(self, accent: str, kind: str) -> QPixmap:
+        pixmap = QPixmap(48, 48)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = QColor(accent)
+        painter.setBrush(QBrush(color.lighter(172)))
+        painter.setPen(QPen(color, 2))
+        painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
+        painter.setBrush(QBrush(color))
+        painter.setPen(QPen(color, 2))
+        if kind == "pack":
+            painter.drawRoundedRect(15, 15, 18, 22, 4, 4)
+            painter.drawLine(18, 20, 30, 20)
+            painter.drawLine(18, 26, 30, 26)
+        elif kind == "origin":
+            painter.drawEllipse(14, 12, 20, 20)
+            painter.drawLine(24, 32, 24, 38)
+            painter.drawLine(19, 27, 29, 27)
+        elif kind == "qc":
+            painter.drawRoundedRect(15, 12, 18, 24, 3, 3)
+            painter.drawLine(19, 21, 23, 25)
+            painter.drawLine(23, 25, 30, 17)
+        else:
+            painter.drawRoundedRect(21, 12, 6, 22, 3, 3)
+            painter.drawEllipse(18, 28, 12, 12)
+            painter.drawLine(31, 16, 36, 16)
+            painter.drawLine(31, 22, 36, 22)
+        painter.end()
+        return pixmap
+
+
+class GuideStep(QFrame):
+    def __init__(self, number: str, title: str, body: str, accent: str):
+        super().__init__()
+        self.setObjectName("guideStep")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+        badge = QLabel(number)
+        badge.setObjectName("guideBadge")
+        badge.setStyleSheet(f"color: {accent};")
+        title_label = QLabel(title)
+        title_label.setObjectName("guideTitle")
+        body_label = QLabel(body)
+        body_label.setObjectName("guideBody")
+        body_label.setWordWrap(True)
+        layout.addWidget(badge)
+        layout.addWidget(title_label)
+        layout.addWidget(body_label)
+
+
 def create_table() -> tuple[QTableView, DataFrameModel]:
     table = QTableView()
     model = DataFrameModel()
@@ -173,6 +263,27 @@ class ProductShelfTab(QWidget):
         hero_layout.addLayout(signal_grid, 2)
         layout.addWidget(hero)
 
+        guide_box = QFrame()
+        guide_box.setObjectName("guidePanel")
+        guide_outer = QVBoxLayout(guide_box)
+        guide_outer.setContentsMargins(12, 10, 12, 12)
+        guide_outer.setSpacing(8)
+        guide_title = QLabel("How merchants use it")
+        guide_title.setObjectName("sectionTitle")
+        guide_outer.addWidget(guide_title)
+        guide_layout = QHBoxLayout()
+        guide_layout.setSpacing(10)
+        guide_steps = [
+            ("1", "Put the product first", "Show name, category, price, and a clear product photo so shoppers know what they are buying.", "#006D77"),
+            ("2", "Connect the batch", "Link the SKU to batch, QR, supplier lots, production date, expiry, and inspection results.", "#1F6F8B"),
+            ("3", "Add proof images", "Upload packshot, origin photo, QC certificate, and cold-chain log. Icons stay here until real assets arrive.", "#D97706"),
+            ("4", "Explain the route", "Let users click the product journey and see time, place, temperature, quality, and who owns the evidence.", "#AD5D4E"),
+        ]
+        for step in guide_steps:
+            guide_layout.addWidget(GuideStep(*step), 1)
+        guide_outer.addLayout(guide_layout)
+        layout.addWidget(guide_box)
+
         main_splitter = QSplitter(Qt.Vertical)
         top_splitter = QSplitter(Qt.Horizontal)
 
@@ -220,6 +331,20 @@ class ProductShelfTab(QWidget):
         product_form.addRow("Batch", self.product_labels["batch"])
         product_form.addRow("Route", self.product_labels["route"])
         route_layout.addWidget(self.product_box, 2)
+
+        self.media_box = QGroupBox("Merchant Image Interface")
+        media_layout = QGridLayout(self.media_box)
+        media_layout.setContentsMargins(10, 8, 10, 8)
+        media_layout.setSpacing(8)
+        self.media_slots = [
+            MerchantImageSlot("Product photo", "merchant_media.product_packshot_url", "Show the exact pack or item.", "#006D77", "pack"),
+            MerchantImageSlot("Origin image", "merchant_media.origin_image_url", "Show farm, supplier, or source.", "#2A9D8F", "origin"),
+            MerchantImageSlot("QC certificate", "merchant_media.qc_certificate_url", "Show inspection proof.", "#D97706", "qc"),
+            MerchantImageSlot("Cold-chain log", "merchant_media.temperature_log_url", "Show temperature proof.", "#AD5D4E", "temp"),
+        ]
+        for idx, slot in enumerate(self.media_slots):
+            media_layout.addWidget(slot, idx // 2, idx % 2)
+        route_layout.addWidget(self.media_box, 2)
         top_splitter.addWidget(route_panel)
         top_splitter.setSizes([780, 660])
         main_splitter.addWidget(top_splitter)
@@ -296,6 +421,7 @@ class ProductShelfTab(QWidget):
         overview = journey["overview"]
         route_nodes = journey["route_nodes"]
         route_edges = journey["route_edges"]
+        media_slots = journey["media_slots"]
         evidence = journey["evidence"]
 
         price = float(overview["unit_price"])
@@ -317,6 +443,9 @@ class ProductShelfTab(QWidget):
         )
         self.route_nodes_model.set_frame(route_nodes)
         self.evidence_model.set_frame(evidence)
+        for idx, (_, row) in enumerate(media_slots.iterrows()):
+            if idx < len(self.media_slots):
+                self.media_slots[idx].update_slot(str(row["placeholder"]), str(row["why"]))
         self._draw_product_route(sku_code, route_nodes, route_edges)
 
     def _draw_empty_route(self, message: str) -> None:
@@ -783,7 +912,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Oasis Finder - Product Supply-Chain Transparency")
-        self.resize(1540, 960)
+        self.resize(1540, 1040)
 
         root = QWidget()
         root_layout = QVBoxLayout(root)
@@ -860,6 +989,34 @@ class MainWindow(QMainWindow):
             QLabel#heroNote {
                 color: #52616B;
                 font-size: 10.5pt;
+            }
+            QFrame#guideStep, QFrame#imageSlot {
+                background: #FFFFFF;
+                border: 1px solid #DDE7E3;
+                border-radius: 10px;
+            }
+            QFrame#guidePanel {
+                background: #FFFFFF;
+                border: 1px solid #D8E2DC;
+                border-radius: 14px;
+            }
+            QLabel#guideBadge {
+                font-size: 18pt;
+                font-weight: 800;
+            }
+            QLabel#guideTitle, QLabel#slotTitle {
+                color: #102A43;
+                font-size: 11.5pt;
+                font-weight: 700;
+            }
+            QLabel#guideBody, QLabel#slotWhy {
+                color: #52616B;
+                font-size: 9.5pt;
+            }
+            QLabel#slotPath {
+                color: #006D77;
+                font-family: "Cascadia Mono", Consolas, monospace;
+                font-size: 8.5pt;
             }
             QTabWidget::pane {
                 border: 1px solid #D8E2DC;
