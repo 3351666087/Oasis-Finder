@@ -664,6 +664,16 @@ p {
   pointer-events: stroke;
 }
 
+.diagram-edge-hitbox {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 18;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  cursor: pointer;
+  pointer-events: stroke;
+}
+
 .diagram-edge.selected {
   stroke: #fbbf24;
   stroke-width: 5;
@@ -1227,6 +1237,16 @@ p {
   align-items: center;
 }
 
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
 .tag-palette button,
 .tag-create button {
   min-height: 36px;
@@ -1241,15 +1261,40 @@ p {
   font-weight: 900;
 }
 
-.tag-palette button.active,
+.tag-palette .tag-chip-main {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-right: 8px;
+}
+
+.tag-palette .tag-delete {
+  min-width: 32px;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+  padding: 0 10px;
+  color: rgba(255, 228, 230, 0.9);
+  background: rgba(190, 18, 60, 0.18);
+}
+
+.tag-chip.active,
+.tag-chip.active .tag-chip-main,
 .tag-create button.active,
-.tag-palette button:hover,
+.tag-chip:hover,
+.tag-chip:hover .tag-chip-main,
 .tag-create button:hover {
   color: #05231a;
   background: #86efac;
 }
 
-.tag-palette span {
+.tag-chip.active .tag-delete,
+.tag-chip:hover .tag-delete {
+  color: #7f1d1d;
+  background: rgba(254, 202, 202, 0.78);
+}
+
+.tag-swatch {
   width: 14px;
   height: 14px;
   border-radius: 999px;

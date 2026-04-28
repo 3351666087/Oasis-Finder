@@ -255,6 +255,17 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+function errorMessage(error, fallback = "Action failed.") {
+  const text = String(error?.message || error || "").trim();
+  if (!text) return fallback;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed.detail || parsed.message || fallback;
+  } catch {
+    return text;
+  }
+}
+
 function mediaUrl(url) {
   if (!url) return "";
   return url.startsWith("http") ? url : `${API}${url}`;
@@ -965,6 +976,16 @@ function DiagramCanvas({
     zoomAround(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
   };
 
+  const selectEdge = (event, edge) => {
+    if (!onEdgeSelect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setConnectionDraft(null);
+    setDraggingNode(null);
+    setPanning(null);
+    onEdgeSelect(edge);
+  };
+
   return (
     <div
       className={`diagram-viewport ${className}`}
@@ -1013,18 +1034,23 @@ function DiagramCanvas({
             const to = layout.nodeMap.get(String(edge.to_code));
             if (!from || !to) return null;
             const edgeId = edgeKey(edge);
+            const path = diagramEdgePath(from, to, layout, index);
             return (
-              <path
-                className={`diagram-edge ${selectedEdgeId === edgeId ? "selected" : ""} ${onEdgeSelect ? "selectable" : ""}`}
-                key={edgeId}
-                d={diagramEdgePath(from, to, layout, index)}
-                markerEnd={`url(#${markerId.current})`}
-                onPointerDown={(event) => {
-                  if (!onEdgeSelect) return;
-                  event.stopPropagation();
-                  onEdgeSelect(edge);
-                }}
-              />
+              <g key={edgeId}>
+                <path
+                  className={`diagram-edge ${selectedEdgeId === edgeId ? "selected" : ""} ${onEdgeSelect ? "selectable" : ""}`}
+                  d={path}
+                  markerEnd={`url(#${markerId.current})`}
+                  onPointerDown={(event) => selectEdge(event, edge)}
+                />
+                {onEdgeSelect && (
+                  <path
+                    className="diagram-edge-hitbox"
+                    d={path}
+                    onPointerDown={(event) => selectEdge(event, edge)}
+                  />
+                )}
+              </g>
             );
           })}
           {connectionDraft && (
@@ -1402,8 +1428,14 @@ function MerchantStudio({ lang, setLang, t }) {
 
   const saveProduct = async () => {
     setStatus("Saving...");
-    await api(`/api/admin/products/${selectedSku}`, { method: "PATCH", body: JSON.stringify(form) });
-    setStatus(t.admin.saved);
+    try {
+      await api(`/api/admin/products/${selectedSku}`, { method: "PATCH", body: JSON.stringify(form) });
+      await loadProducts();
+      await loadDetail(selectedSku);
+      setStatus(t.admin.saved);
+    } catch (error) {
+      setStatus(`Save failed: ${errorMessage(error)}`);
+    }
   };
 
   return (
@@ -1619,43 +1651,55 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
   const saveLayer = async () => {
     if (!currentItem) return;
     setStatus("Saving layer data...");
-    await api(`/api/admin/products/${sku}/detail`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        section: activeSection.key,
-        item_id: activeSection.key === "overview" ? null : String(currentItem[activeSection.idField]),
-        updates: draft,
-      }),
-    });
-    setStatus(t.admin.saved);
-    await onSaved();
+    try {
+      await api(`/api/admin/products/${sku}/detail`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          section: activeSection.key,
+          item_id: activeSection.key === "overview" ? null : String(currentItem[activeSection.idField]),
+          updates: draft,
+        }),
+      });
+      await onSaved();
+      setStatus(t.admin.saved);
+    } catch (error) {
+      setStatus(`Save failed: ${errorMessage(error)}`);
+    }
   };
 
   const createRecord = async () => {
     if (activeSection.key === "overview") return;
     setStatus("Creating record...");
-    const result = await api(`/api/admin/products/${sku}/detail`, {
-      method: "POST",
-      body: JSON.stringify({
-        section: activeSection.key,
-        item: defaultDetailRecord(activeSection.key, detail),
-      }),
-    });
-    setStatus("Created. You can rename it now.");
-    await onSaved();
-    setSelectedId(result.item_id);
+    try {
+      const result = await api(`/api/admin/products/${sku}/detail`, {
+        method: "POST",
+        body: JSON.stringify({
+          section: activeSection.key,
+          item: defaultDetailRecord(activeSection.key, detail),
+        }),
+      });
+      await onSaved();
+      setSelectedId(result.item_id);
+      setStatus("Created. You can rename it now.");
+    } catch (error) {
+      setStatus(`Create failed: ${errorMessage(error)}`);
+    }
   };
 
   const deleteRecord = async () => {
     if (activeSection.key === "overview" || !currentItem) return;
     const itemId = String(currentItem[activeSection.idField]);
     setStatus("Deleting record...");
-    await api(`/api/admin/products/${sku}/detail/${activeSection.key}/${encodeURIComponent(itemId)}`, {
-      method: "DELETE",
-    });
-    setSelectedId("");
-    setStatus("Deleted. Customer page will refresh automatically.");
-    await onSaved();
+    try {
+      await api(`/api/admin/products/${sku}/detail/${activeSection.key}/${encodeURIComponent(itemId)}`, {
+        method: "DELETE",
+      });
+      setSelectedId("");
+      await onSaved();
+      setStatus("Deleted. Customer page will refresh automatically.");
+    } catch (error) {
+      setStatus(`Delete failed: ${errorMessage(error)}`);
+    }
   };
 
   return (
@@ -1733,11 +1777,15 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
   const selectedNode = nodes.find((node) => node.facility_code === selectedId) || nodes[0];
   const selectedEdge = edges.find((edge) => edgeKey(edge) === selectedEdgeId);
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [nodeKey(node), node])), [nodes]);
+  const hiddenTags = useMemo(
+    () => (detail.overview?.hidden_flow_tags || []).map((tag) => String(tag)),
+    [detail.overview?.hidden_flow_tags],
+  );
   const tagPalette = useMemo(() => mergeTagPalettes(
     DEFAULT_TAGS,
     detail.overview?.flow_tags || [],
     nodes.map((node) => ({ label: nodeTagLabel(node), color: nodeAccentColor(node) })),
-  ), [detail.overview?.flow_tags, nodes]);
+  ).filter((tag) => !hiddenTags.includes(tag.label)), [detail.overview?.flow_tags, hiddenTags, nodes]);
   const activeTag = tagPalette.find((tag) => tag.label === selectedTag) || tagPalette[0] || DEFAULT_TAGS[0];
 
   useEffect(() => {
@@ -1787,28 +1835,36 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
 
   const addNode = async () => {
     setStatus("Adding node...");
-    const result = await api(`/api/admin/products/${sku}/detail`, {
-      method: "POST",
-      body: JSON.stringify({
-        section: "route_nodes",
-        item: defaultDetailRecord("route_nodes", detail),
-      }),
-    });
-    setStatus("Node added. Rename it and drag it into place.");
-    await onSaved();
-    setSelectedId(result.item_id);
+    try {
+      const result = await api(`/api/admin/products/${sku}/detail`, {
+        method: "POST",
+        body: JSON.stringify({
+          section: "route_nodes",
+          item: defaultDetailRecord("route_nodes", detail),
+        }),
+      });
+      await onSaved();
+      setSelectedId(result.item_id);
+      setStatus("Node added. Rename it and drag it into place.");
+    } catch (error) {
+      setStatus(`Add node failed: ${errorMessage(error)}`);
+    }
   };
 
   const deleteNode = async () => {
     if (!selectedNode) return;
     setSelectedEdgeId("");
     setStatus("Deleting node and connected links...");
-    await api(`/api/admin/products/${sku}/detail/route_nodes/${encodeURIComponent(selectedNode.facility_code)}`, {
-      method: "DELETE",
-    });
-    setSelectedId("");
-    setStatus("Node deleted.");
-    await onSaved();
+    try {
+      await api(`/api/admin/products/${sku}/detail/route_nodes/${encodeURIComponent(selectedNode.facility_code)}`, {
+        method: "DELETE",
+      });
+      setSelectedId("");
+      await onSaved();
+      setStatus("Node deleted.");
+    } catch (error) {
+      setStatus(`Delete node failed: ${errorMessage(error)}`);
+    }
   };
 
   const hasConnector = (fromCode, toCode, exceptEdgeId = "") => edges.some((edge) => (
@@ -1830,12 +1886,16 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
   const deleteSelectedEdge = async () => {
     if (!selectedEdge) return;
     setStatus("Deleting selected connector...");
-    await api(`/api/admin/products/${sku}/detail/route_edges/${encodeURIComponent(edgeKey(selectedEdge))}`, {
-      method: "DELETE",
-    });
-    setSelectedEdgeId("");
-    setStatus("Connector deleted.");
-    await onSaved();
+    try {
+      await api(`/api/admin/products/${sku}/detail/route_edges/${encodeURIComponent(edgeKey(selectedEdge))}`, {
+        method: "DELETE",
+      });
+      setSelectedEdgeId("");
+      await onSaved();
+      setStatus("Connector deleted.");
+    } catch (error) {
+      setStatus(`Delete connector failed: ${errorMessage(error)}`);
+    }
   };
 
   const reverseSelectedEdge = async () => {
@@ -1857,7 +1917,7 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
       setStatus("Arrow direction reversed.");
       await onSaved();
     } catch (error) {
-      setStatus("A connector between those two nodes already exists.");
+      setStatus(`Reverse failed: ${errorMessage(error, "A connector between those two nodes already exists.")}`);
     }
   };
 
@@ -1895,7 +1955,7 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
       await onSaved();
     } catch (error) {
       setConnectFrom("");
-      setStatus("Those two nodes are already connected.");
+      setStatus(`Create link failed: ${errorMessage(error, "Those two nodes are already connected.")}`);
     }
   };
 
@@ -1904,12 +1964,45 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
     if (!label) return;
     const nextTag = { label, color: tagDraft.color || "#67e8f9" };
     const nextTags = mergeTagPalettes(detail.overview?.flow_tags || [], tagPalette, nextTag);
+    const nextHiddenTags = hiddenTags.filter((tag) => tag !== label);
     setStatus("Saving tag...");
-    await patchOverview({ flow_tags: nextTags });
-    setSelectedTag(label);
-    setTagDraft({ label: "", color: nextTag.color });
-    setStatus("Tag saved. Paint nodes with it from the full-screen editor.");
-    await onSaved();
+    try {
+      await patchOverview({ flow_tags: nextTags, hidden_flow_tags: nextHiddenTags });
+      setSelectedTag(label);
+      setTagDraft({ label: "", color: nextTag.color });
+      await onSaved();
+      setStatus("Tag saved. Paint nodes with it from the full-screen editor.");
+    } catch (error) {
+      setStatus(`Tag save failed: ${errorMessage(error)}`);
+    }
+  };
+
+  const deleteTag = async (tag) => {
+    const normalized = normalizeTag(tag);
+    if (!normalized) return;
+    const label = normalized.label;
+    const flowTags = mergeTagPalettes(detail.overview?.flow_tags || []).filter((item) => item.label !== label);
+    const nextHiddenTags = Array.from(new Set([...hiddenTags, label]));
+    const affectedNodes = nodes.filter((node) => node.paint_tag === label || nodeTagLabel(node) === label);
+    setStatus(`Deleting tag ${label}...`);
+    try {
+      setNodes((current) => current.map((node) => (
+        node.paint_tag === label || nodeTagLabel(node) === label
+          ? { ...node, paint_tag: "", paint_color: "" }
+          : node
+      )));
+      await patchOverview({ flow_tags: flowTags, hidden_flow_tags: nextHiddenTags });
+      await Promise.all(affectedNodes.map((node) => patchNode(node, { paint_tag: "", paint_color: "" })));
+      if (selectedTag === label) {
+        const nextTag = tagPalette.find((item) => item.label !== label);
+        setSelectedTag(nextTag?.label || DEFAULT_TAGS[0].label);
+      }
+      await onSaved();
+      setStatus(`Tag ${label} deleted.`);
+    } catch (error) {
+      setStatus(`Tag delete failed: ${errorMessage(error)}`);
+      await onSaved();
+    }
   };
 
   const paintNode = async (node) => {
@@ -1925,12 +2018,17 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
       nodeKey(item) === code ? { ...item, paint_tag: normalized.label, paint_color: normalized.color } : item
     )));
     setStatus(`Painting ${nodeDisplayName(node)} as ${normalized.label}...`);
-    await patchNode(node, { paint_tag: normalized.label, paint_color: normalized.color });
-    setSelectedId(code);
-    setSelectedEdgeId("");
-    setSelectedTag(normalized.label);
-    setStatus("Node tag applied.");
-    await onSaved();
+    try {
+      await patchNode(node, { paint_tag: normalized.label, paint_color: normalized.color });
+      setSelectedId(code);
+      setSelectedEdgeId("");
+      setSelectedTag(normalized.label);
+      await onSaved();
+      setStatus("Node tag applied.");
+    } catch (error) {
+      setStatus(`Tag paint failed: ${errorMessage(error)}`);
+      await onSaved();
+    }
   };
 
   const handleNodeClick = async (node) => {
@@ -1958,13 +2056,17 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
     const node = nodes.find((item) => nodeKey(item) === code);
     if (!node || point.x == null || point.y == null) return;
     setStatus("Saving node position...");
-    await patchNode(node, {
-      mesh_px_x: Number(point.x).toFixed(2),
-      mesh_px_y: Number(point.y).toFixed(2),
-      layout_locked: true,
-    });
-    setStatus("Node position saved.");
-    await onSaved();
+    try {
+      await patchNode(node, {
+        mesh_px_x: Number(point.x).toFixed(2),
+        mesh_px_y: Number(point.y).toFixed(2),
+        layout_locked: true,
+      });
+      await onSaved();
+      setStatus("Node position saved.");
+    } catch (error) {
+      setStatus(`Position save failed: ${errorMessage(error)}`);
+    }
   };
 
   const autoLayoutNodes = async () => {
@@ -1972,13 +2074,17 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
     setStatus("Applying automatic layout...");
     const layout = buildDiagramLayout(nodes, { preferSaved: false, routeLayout: detail.route.layout });
     setNodes(layout.nodes.map((node) => ({ ...node, layout_locked: false })));
-    await Promise.all(layout.nodes.map((node) => patchNode(node, {
-      mesh_px_x: Number(node.mesh_px_x).toFixed(2),
-      mesh_px_y: Number(node.mesh_px_y).toFixed(2),
-      layout_locked: false,
-    })));
-    setStatus("Automatic layout applied.");
-    await onSaved();
+    try {
+      await Promise.all(layout.nodes.map((node) => patchNode(node, {
+        mesh_px_x: Number(node.mesh_px_x).toFixed(2),
+        mesh_px_y: Number(node.mesh_px_y).toFixed(2),
+        layout_locked: false,
+      })));
+      await onSaved();
+      setStatus("Automatic layout applied.");
+    } catch (error) {
+      setStatus(`Auto layout failed: ${errorMessage(error)}`);
+    }
   };
 
   const renderToolbar = (insideModal = false) => (
@@ -2014,21 +2120,31 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
     <div className="tag-toolbar">
       <div className="tag-palette" aria-label="Node tags">
         {tagPalette.map((tag) => (
-          <button
-            type="button"
-            draggable
-            key={tag.label}
-            className={selectedTag === tag.label ? "active" : ""}
-            onClick={() => setSelectedTag(tag.label)}
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = "copy";
-              event.dataTransfer.setData("application/json", JSON.stringify(tag));
-              event.dataTransfer.setData("text/plain", tag.label);
-            }}
-          >
-            <span style={{ background: tag.color }} />
-            {tag.label}
-          </button>
+          <span className={`tag-chip ${selectedTag === tag.label ? "active" : ""}`} key={tag.label}>
+            <button
+              type="button"
+              draggable
+              className="tag-chip-main"
+              onClick={() => setSelectedTag(tag.label)}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "copy";
+                event.dataTransfer.setData("application/json", JSON.stringify(tag));
+                event.dataTransfer.setData("text/plain", tag.label);
+              }}
+            >
+              <span className="tag-swatch" style={{ background: tag.color }} />
+              {tag.label}
+            </button>
+            <button
+              type="button"
+              className="tag-delete"
+              title={`Delete tag ${tag.label}`}
+              aria-label={`Delete tag ${tag.label}`}
+              onClick={() => deleteTag(tag)}
+            >
+              ×
+            </button>
+          </span>
         ))}
       </div>
       <div className="tag-create">

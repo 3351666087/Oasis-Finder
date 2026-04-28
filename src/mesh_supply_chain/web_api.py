@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import math
 import sys
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -119,6 +120,17 @@ def records(frame: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 _DEMO_PAYLOAD_CACHE: dict[str, Any] | None = None
+_DATABASE_RETRY_AFTER = 0.0
+_DATABASE_RETRY_DELAY_SECONDS = 20.0
+
+
+def should_try_database() -> bool:
+    return time.monotonic() >= _DATABASE_RETRY_AFTER
+
+
+def mark_database_unavailable() -> None:
+    global _DATABASE_RETRY_AFTER
+    _DATABASE_RETRY_AFTER = time.monotonic() + _DATABASE_RETRY_DELAY_SECONDS
 
 
 def demo_payload_path() -> Path:
@@ -145,7 +157,19 @@ def read_demo_payloads() -> dict[str, Any]:
 
 def demo_product_shelf() -> list[dict[str, Any]]:
     payload = deepcopy(read_demo_payloads().get("products", []))
+    detail_store = read_detail_store()
     for product in payload:
+        overview_overrides = detail_store.get(str(product.get("sku_code", "")), {}).get("overview", {})
+        if "product_name" in overview_overrides:
+            product["product_name"] = overview_overrides["product_name"]
+        if "unit_price" in overview_overrides:
+            product["unit_price"] = overview_overrides["unit_price"]
+        if "shelf_life_days" in overview_overrides:
+            product["shelf_life_days"] = overview_overrides["shelf_life_days"]
+        if "storage_temp_band" in overview_overrides:
+            product["storage_temp_band"] = overview_overrides["storage_temp_band"]
+        if "category" in overview_overrides:
+            product["category_label"] = overview_overrides["category"]
         slots = media_slots_for(str(product.get("sku_code", "")))
         primary = next((slot for slot in slots if slot["media_key"] == "product_packshot_url"), None)
         product["primary_media_url"] = primary["url"] if primary else product.get("primary_media_url", "")
@@ -160,6 +184,11 @@ def demo_product_detail_payload(sku_code: str) -> dict[str, Any]:
 
 
 def safe_product_detail_payload(sku_code: str) -> dict[str, Any]:
+    if not should_try_database():
+        try:
+            return demo_product_detail_payload(sku_code)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     try:
         return product_detail_payload(sku_code)
     except ValueError as exc:
@@ -168,6 +197,7 @@ def safe_product_detail_payload(sku_code: str) -> dict[str, Any]:
         except ValueError:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
+        mark_database_unavailable()
         try:
             return demo_product_detail_payload(sku_code)
         except ValueError:
@@ -952,16 +982,25 @@ def api_health() -> dict[str, str]:
 
 @app.get("/api/products")
 def api_products() -> list[dict[str, Any]]:
-    try:
-        shelf = load_product_shelf()
-        payload = records(shelf)
-    except Exception as exc:
+    if should_try_database():
+        try:
+            shelf = load_product_shelf()
+            payload = records(shelf)
+        except Exception as exc:
+            mark_database_unavailable()
+            payload = demo_product_shelf()
+            if not payload:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database is unavailable and no packaged demo products are available.",
+                ) from exc
+    else:
         payload = demo_product_shelf()
         if not payload:
             raise HTTPException(
                 status_code=503,
                 detail="Database is unavailable and no packaged demo products are available.",
-            ) from exc
+            )
     for product in payload:
         slots = media_slots_for(str(product["sku_code"]))
         primary = next((slot for slot in slots if slot["media_key"] == "product_packshot_url"), None)
@@ -981,7 +1020,21 @@ async def api_update_product(sku_code: str, payload: ProductUpdate) -> dict[str,
         if hasattr(payload, "model_dump")
         else payload.dict(exclude_unset=True)
     )
-    result = update_product_fields(sku_code, updates)
+    try:
+        if not should_try_database():
+            raise RuntimeError("Database retry delay is active; saving product fields to packaged demo store.")
+        result = update_product_fields(sku_code, updates)
+    except Exception:
+        mark_database_unavailable()
+        store = read_detail_store()
+        store.setdefault(sku_code, {}).setdefault("overview", {}).update(clean_record(updates))
+        write_detail_store(store)
+        result = {
+            "updated": bool(updates),
+            "sku_code": sku_code,
+            "fields": list(updates.keys()),
+            "storage": "packaged_demo_override",
+        }
     await bus.broadcast({"type": "product.updated", "sku_code": sku_code, "result": result})
     return {"ok": True, **result}
 
@@ -1123,15 +1176,24 @@ async def api_delete_detail(sku_code: str, section: str, item_id: str) -> dict[s
 
     store = read_detail_store()
     sku_store = store.setdefault(sku_code, {})
-    sku_store.setdefault(section, {}).pop(item_id, None)
+    item_ids = {str(item_id)}
+    if section == "route_edges":
+        detail = safe_product_detail_payload(sku_code)
+        for edge in detail.get("route", {}).get("edges", []):
+            edge_ids = {str(edge.get("edge_id") or ""), edge_identity(edge)}
+            if str(item_id) in edge_ids:
+                item_ids.update(edge_id for edge_id in edge_ids if edge_id)
+
     deleted = sku_store.setdefault("_deleted", {}).setdefault(section, [])
-    if item_id not in deleted:
-        deleted.append(item_id)
+    for row_id in item_ids:
+        sku_store.setdefault(section, {}).pop(row_id, None)
+        if row_id not in deleted:
+            deleted.append(row_id)
 
     if section == "route_nodes":
         detail = safe_product_detail_payload(sku_code)
         connected_edges = [
-            str(edge.get("edge_id"))
+            str(edge.get("edge_id") or edge_identity(edge))
             for edge in detail.get("route", {}).get("edges", [])
             if str(edge.get("from_code")) == item_id or str(edge.get("to_code")) == item_id
         ]
