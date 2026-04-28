@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -27,7 +28,7 @@ const I18N = {
     routeSwitch: "供应链路线",
     wholeRoute: "整品供应链",
     moduleRoute: "元件供应链",
-    routeHint: "筛选 L1 / L2 / L3 / CORE 等层级，点击节点可查看更直观的阶段数据。",
+    routeHint: "按标签或阶段筛选路线，点击节点可查看更直观的阶段数据。",
     layerAll: "全部层级",
     nodeDetail: "节点详情",
     nodeHint: "点击任意路线节点查看时间、地点、角色和可展示值。",
@@ -55,7 +56,7 @@ const I18N = {
       title: "编辑商品、图片和每层供应链数据",
       intro: "这里给商家使用。改完任意数据后，客户前台会收到实时更新。",
       flowTitle: "商家流程",
-      flow: "选择 SKU → 编辑商品 → 编辑 L1/L2/L3/CORE 节点 → 上传图片 → 前台刷新",
+      flow: "选择 SKU → 编辑商品 → 编辑流程节点与标签 → 上传图片 → 前台刷新",
       ready: "就绪",
       dataEditor: "商品基础数据",
       dataHint: "第 1 步：编辑商品基础字段。第 2 步：编辑每个层级。第 3 步：上传图片证据。",
@@ -64,7 +65,7 @@ const I18N = {
       sections: {
         overview: "整品/批次",
         modules: "商品元件",
-        route_nodes: "L1/L2/L3/节点",
+        route_nodes: "流程节点/标签",
         route_edges: "流向/边",
         evidence: "证据行",
       },
@@ -89,7 +90,6 @@ const I18N = {
       qr_code: "二维码",
       module_name: "元件名称",
       module_category: "元件类别",
-      supplier_tier: "供应商层级",
       supplier_city: "供应商城市",
       lot_code: "批号",
       received_on: "入厂日期",
@@ -98,7 +98,8 @@ const I18N = {
       temperature_excursion_minutes: "温度偏离分钟",
       plain_language: "客户可读说明",
       stage: "阶段",
-      tier: "层级",
+      paint_tag: "标签",
+      paint_color: "标签颜色",
       facility_code: "节点编码",
       facility_name: "节点名称",
       facility_type: "节点类型",
@@ -141,7 +142,7 @@ const I18N = {
     routeSwitch: "Supply-chain route",
     wholeRoute: "Whole-product supply chain",
     moduleRoute: "Selected module supply chain",
-    routeHint: "Filter L1 / L2 / L3 / CORE layers, then click a node to see clearer stage data.",
+    routeHint: "Filter by tag or stage, then click a node to see clearer stage data.",
     layerAll: "All layers",
     nodeDetail: "Node detail",
     nodeHint: "Click any route node to inspect time, place, role, and display value.",
@@ -169,7 +170,7 @@ const I18N = {
       title: "Edit products, media, and every supply-chain layer",
       intro: "This is for merchants. Any saved change is pushed to the customer frontend.",
       flowTitle: "Merchant flow",
-      flow: "Select SKU → edit product → edit L1/L2/L3/CORE nodes → upload images → frontend refreshes",
+      flow: "Select SKU → edit product → edit flow nodes and tags → upload images → frontend refreshes",
       ready: "Ready",
       dataEditor: "Product data editor",
       dataHint: "Step 1: edit product fields. Step 2: edit every layer. Step 3: upload evidence images.",
@@ -178,7 +179,7 @@ const I18N = {
       sections: {
         overview: "Whole product / batch",
         modules: "Product modules",
-        route_nodes: "L1/L2/L3 nodes",
+        route_nodes: "Flow nodes / tags",
         route_edges: "Flows / edges",
         evidence: "Evidence rows",
       },
@@ -203,7 +204,6 @@ const I18N = {
       qr_code: "QR code",
       module_name: "Module name",
       module_category: "Module category",
-      supplier_tier: "Supplier tier",
       supplier_city: "Supplier city",
       lot_code: "Lot code",
       received_on: "Received on",
@@ -212,7 +212,8 @@ const I18N = {
       temperature_excursion_minutes: "Temperature excursion minutes",
       plain_language: "Plain-language message",
       stage: "Stage",
-      tier: "Tier",
+      paint_tag: "Tag",
+      paint_color: "Tag color",
       facility_code: "Facility code",
       facility_name: "Facility name",
       facility_type: "Facility type",
@@ -354,7 +355,7 @@ function ConsumerExperience({ lang, setLang, t }) {
   const selectedModulePayload = detail?.modules?.find((item) => item.module_id === selectedModule);
   const route = selectedModule === "whole"
     ? detail?.route
-    : { nodes: selectedModulePayload?.route_nodes || [], edges: selectedModulePayload?.route_edges || [] };
+    : { nodes: selectedModulePayload?.route_nodes || [], edges: selectedModulePayload?.route_edges || [], layout: selectedModulePayload?.route_layout };
 
   return (
     <div className="app-shell consumer-bg">
@@ -486,7 +487,7 @@ function ProductDissection({ detail, selectedModule, setSelectedModule, t }) {
             >
               <span>{module.module_category}</span>
               <strong>{moduleDisplayName(module)}</strong>
-              <small>{module.supplier_tier || "L?"} · {module.supplier_city || "mapped supplier"} · score {Number(module.module_score || 0).toFixed(1)}</small>
+              <small>{module.supplier_city || "mapped supplier"} · score {Number(module.module_score || 0).toFixed(1)}</small>
             </button>
           ))}
         </div>
@@ -523,12 +524,628 @@ function nodeDisplayName(node) {
   return node?.display_name || node?.facility_name || node?.facility_code || "Supply-chain node";
 }
 
+function nodeTagLabel(node) {
+  return node?.paint_tag || node?.tag_label || node?.material_tag || node?.facility_type || "Node";
+}
+
+function nodeAccentColor(node) {
+  return node?.paint_color || node?.tag_color || "#67e8f9";
+}
+
+function normalizeTag(tag) {
+  if (!tag) return null;
+  if (typeof tag === "string") return { label: tag, color: "#67e8f9" };
+  const label = String(tag.label || tag.name || "").trim();
+  if (!label) return null;
+  return { label, color: tag.color || "#67e8f9" };
+}
+
+function mergeTagPalettes(...groups) {
+  const merged = new Map();
+  groups.flat().forEach((tag) => {
+    const normalized = normalizeTag(tag);
+    if (normalized && !merged.has(normalized.label)) merged.set(normalized.label, normalized);
+  });
+  return Array.from(merged.values());
+}
+
 function moduleDisplayName(module) {
   return module?.display_module_name || module?.module_name || module?.module_id || "Product module";
 }
 
 function clampCanvasPercent(value) {
   return Math.max(4, Math.min(96, Number(value) || 50));
+}
+
+const NODE_CARD_WIDTH = 218;
+const NODE_CARD_HEIGHT = 98;
+const DIAGRAM_PADDING_X = 150;
+const DIAGRAM_PADDING_Y = 92;
+const DIAGRAM_COLUMN_GAP = 330;
+const DIAGRAM_ROW_GAP = 146;
+const DIAGRAM_MIN_WIDTH = 1120;
+const DIAGRAM_MIN_HEIGHT = 620;
+const STAGE_ORDER = [
+  "Raw material origin",
+  "Regional aggregation",
+  "Ingredient source",
+  "Quality / compliance gate",
+  "Processing / packing",
+  "Distribution center",
+  "Logistics node",
+  "Retail shelf",
+];
+const DEFAULT_TAGS = [
+  { label: "Raw material", color: "#67e8f9" },
+  { label: "Quality gate", color: "#86efac" },
+  { label: "Processing", color: "#fbbf24" },
+  { label: "Logistics", color: "#f472b6" },
+  { label: "Retail", color: "#a78bfa" },
+];
+
+function stageRank(stage) {
+  const index = STAGE_ORDER.indexOf(stage || "");
+  return index === -1 ? STAGE_ORDER.length : index;
+}
+
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function groupNodesByStage(nodes) {
+  const groups = new Map();
+  nodes.forEach((node) => {
+    const stage = node.stage || "Editable stage";
+    if (!groups.has(stage)) groups.set(stage, []);
+    groups.get(stage).push(node);
+  });
+  return Array.from(groups.entries())
+    .map(([stage, stageNodes]) => ({
+      stage,
+      nodes: [...stageNodes].sort((a, b) => (
+        nodeTagLabel(a).localeCompare(nodeTagLabel(b))
+        || nodeDisplayName(a).localeCompare(nodeDisplayName(b))
+      )),
+    }))
+    .sort((a, b) => stageRank(a.stage) - stageRank(b.stage) || a.stage.localeCompare(b.stage));
+}
+
+function buildDiagramLayout(rawNodes, { preferSaved = true, routeLayout = null } = {}) {
+  const groups = groupNodesByStage(rawNodes || []);
+  const layoutNodeWidth = Number(routeLayout?.node_width) || NODE_CARD_WIDTH;
+  const layoutNodeHeight = Number(routeLayout?.node_height) || NODE_CARD_HEIGHT;
+  const maxRows = Math.max(1, ...groups.map((group) => group.nodes.length));
+  const savedMaxX = Math.max(0, ...(rawNodes || []).map((node) => numberOrNull(node.mesh_px_x) || 0));
+  const savedMaxY = Math.max(0, ...(rawNodes || []).map((node) => numberOrNull(node.mesh_px_y) || 0));
+  let width = Math.max(
+    Number(routeLayout?.width) || 0,
+    DIAGRAM_MIN_WIDTH,
+    DIAGRAM_PADDING_X * 2 + layoutNodeWidth + Math.max(0, groups.length - 1) * DIAGRAM_COLUMN_GAP,
+    savedMaxX + layoutNodeWidth + DIAGRAM_PADDING_X,
+  );
+  let height = Math.max(
+    Number(routeLayout?.height) || 0,
+    DIAGRAM_MIN_HEIGHT,
+    DIAGRAM_PADDING_Y * 2 + layoutNodeHeight + Math.max(0, maxRows - 1) * DIAGRAM_ROW_GAP,
+    savedMaxY + layoutNodeHeight + DIAGRAM_PADDING_Y,
+  );
+  const positioned = [];
+  const bands = [];
+  const occupied = [];
+
+  const hasOverlap = (x, y) => {
+    const left = x - layoutNodeWidth / 2;
+    const right = x + layoutNodeWidth / 2;
+    const top = y - layoutNodeHeight / 2;
+    const bottom = y + layoutNodeHeight / 2;
+    return occupied.some((box) => left < box.right && right > box.left && top < box.bottom && bottom > box.top);
+  };
+
+  groups.forEach((group, groupIndex) => {
+    const savedBand = routeLayout?.bands?.find((band) => band.stage === group.stage);
+    const x = savedBand
+      ? Number(savedBand.x) + (Number(savedBand.width) / 2)
+      : DIAGRAM_PADDING_X + groupIndex * DIAGRAM_COLUMN_GAP;
+    bands.push({
+      stage: group.stage,
+      x: savedBand ? Number(savedBand.x) : x - layoutNodeWidth / 2 - 28,
+      y: savedBand ? Number(savedBand.y || 34) : 34,
+      width: savedBand ? Number(savedBand.width) : layoutNodeWidth + 56,
+      height: savedBand ? Math.max(Number(savedBand.height || 0), height - 68) : height - 68,
+    });
+    group.nodes.forEach((node, rowIndex) => {
+      const savedX = preferSaved ? numberOrNull(node.mesh_px_x) : null;
+      const savedY = preferSaved ? numberOrNull(node.mesh_px_y) : null;
+      const percentX = preferSaved && numberOrNull(node.mesh_x) != null ? (numberOrNull(node.mesh_x) / 100) * width : null;
+      const percentY = preferSaved && numberOrNull(node.mesh_y) != null ? (numberOrNull(node.mesh_y) / 100) * height : null;
+      let nodeX = savedX ?? (node.layout_locked ? percentX : null) ?? x;
+      let nodeY = savedY ?? (node.layout_locked ? percentY : null) ?? (DIAGRAM_PADDING_Y + rowIndex * DIAGRAM_ROW_GAP + ((groupIndex % 2) * 12));
+      nodeX = clampNumber(nodeX, layoutNodeWidth / 2 + 18, width - layoutNodeWidth / 2 - 18);
+      nodeY = clampNumber(nodeY, layoutNodeHeight / 2 + 18, height - layoutNodeHeight / 2 - 18);
+      while (hasOverlap(nodeX, nodeY)) {
+        nodeY += DIAGRAM_ROW_GAP;
+        if (nodeY + layoutNodeHeight / 2 + DIAGRAM_PADDING_Y > height) {
+          height += DIAGRAM_ROW_GAP;
+        }
+      }
+      occupied.push({
+        left: nodeX - layoutNodeWidth / 2,
+        top: nodeY - layoutNodeHeight / 2,
+        right: nodeX + layoutNodeWidth / 2,
+        bottom: nodeY + layoutNodeHeight / 2,
+      });
+      positioned.push({
+        ...node,
+        mesh_px_x: nodeX,
+        mesh_px_y: nodeY,
+      });
+    });
+  });
+
+  return {
+    width,
+    height,
+    nodes: positioned,
+    bands: bands.map((band) => ({ ...band, height: Math.max(band.height, height - 68) })),
+    nodeMap: new Map(positioned.map((node) => [nodeKey(node), node])),
+    nodeWidth: layoutNodeWidth,
+    nodeHeight: layoutNodeHeight,
+  };
+}
+
+function diagramEdgePath(from, to, layout, index = 0) {
+  const dx = Number(to.mesh_px_x) - Number(from.mesh_px_x);
+  const dy = Number(to.mesh_px_y) - Number(from.mesh_px_y);
+  const preferHorizontal = Math.abs(dx) >= Math.abs(dy) && Math.abs(dx) > layout.nodeWidth * 0.45;
+  const fromSide = preferHorizontal ? (dx >= 0 ? "right" : "left") : (dy >= 0 ? "bottom" : "top");
+  const toSide = preferHorizontal ? (dx >= 0 ? "left" : "right") : (dy >= 0 ? "top" : "bottom");
+  const start = connectionAnchor(from, layout, fromSide);
+  const end = connectionAnchor(to, layout, toSide);
+  const offset = ((index % 5) - 2) * 14;
+  if (fromSide === "right" || fromSide === "left") {
+    const direction = fromSide === "right" ? 1 : -1;
+    const startOut = start.x + direction * 42;
+    const endIn = end.x - direction * 42;
+    const middleX = startOut + ((endIn - startOut) / 2) + offset;
+    return `M ${start.x} ${start.y} L ${startOut} ${start.y} L ${middleX} ${start.y} L ${middleX} ${end.y} L ${endIn} ${end.y} L ${end.x} ${end.y}`;
+  }
+  const direction = fromSide === "bottom" ? 1 : -1;
+  const startOut = start.y + direction * 42;
+  const endIn = end.y - direction * 42;
+  const middleY = startOut + ((endIn - startOut) / 2) + offset;
+  return `M ${start.x} ${start.y} L ${start.x} ${startOut} L ${start.x} ${middleY} L ${end.x} ${middleY} L ${end.x} ${endIn} L ${end.x} ${end.y}`;
+}
+
+function diagramPointPath(start, end) {
+  const middleX = start.x + ((end.x - start.x) / 2);
+  return `M ${start.x} ${start.y} L ${middleX} ${start.y} L ${middleX} ${end.y} L ${end.x} ${end.y}`;
+}
+
+function connectionAnchor(node, layout, side) {
+  const x = Number(node.mesh_px_x);
+  const y = Number(node.mesh_px_y);
+  if (side === "left") return { x: x - layout.nodeWidth / 2, y };
+  if (side === "top") return { x, y: y - layout.nodeHeight / 2 };
+  if (side === "bottom") return { x, y: y + layout.nodeHeight / 2 };
+  return { x: x + layout.nodeWidth / 2, y };
+}
+
+function isTypingTarget(target) {
+  const tag = target?.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable;
+}
+
+function requestBrowserFullscreen() {
+  if (document.fullscreenElement) return;
+  document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
+function DiagramCanvas({
+  route,
+  nodes,
+  edges,
+  activeNodeCode,
+  onNodeSelect,
+  selectedEdgeId = "",
+  onEdgeSelect,
+  editable = false,
+  nodesInteractive = true,
+  connectFrom = "",
+  onConnectNodes,
+  onNodeDrag,
+  onNodeDragEnd,
+  onTagDrop,
+  className = "",
+  preferSaved = true,
+  fitPadding = 44,
+}) {
+  const viewportRef = useRef(null);
+  const markerId = useRef(`diagramArrow-${Math.random().toString(36).slice(2)}`);
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const [panning, setPanning] = useState(null);
+  const [draggingNode, setDraggingNode] = useState(null);
+  const [connectionDraft, setConnectionDraft] = useState(null);
+  const [connectionTargetCode, setConnectionTargetCode] = useState("");
+  const layout = useMemo(
+    () => buildDiagramLayout(nodes, { preferSaved, routeLayout: route?.layout }),
+    [nodes, preferSaved, route?.layout],
+  );
+  const visibleCodes = useMemo(() => new Set(layout.nodes.map(nodeKey)), [layout.nodes]);
+  const visibleEdges = useMemo(
+    () => (edges || []).filter((edge) => visibleCodes.has(String(edge.from_code)) && visibleCodes.has(String(edge.to_code))),
+    [edges, visibleCodes],
+  );
+
+  const fitToViewport = () => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect?.width || !rect?.height) return;
+    const nextScale = clampNumber(
+      Math.min((rect.width - fitPadding) / layout.width, (rect.height - fitPadding) / layout.height, 1),
+      0.18,
+      1,
+    );
+    setView({
+      scale: nextScale,
+      x: (rect.width - layout.width * nextScale) / 2,
+      y: (rect.height - layout.height * nextScale) / 2,
+    });
+  };
+
+  useEffect(() => {
+    fitToViewport();
+    const viewport = viewportRef.current;
+    if (!viewport || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(fitToViewport);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [layout.width, layout.height, fitPadding]);
+
+  const clientToDiagram = (event, currentView = view) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect) return { x: layout.width / 2, y: layout.height / 2 };
+    return {
+      x: clampNumber((event.clientX - rect.left - currentView.x) / currentView.scale, layout.nodeWidth / 2 + 18, layout.width - layout.nodeWidth / 2 - 18),
+      y: clampNumber((event.clientY - rect.top - currentView.y) / currentView.scale, layout.nodeHeight / 2 + 18, layout.height - layout.nodeHeight / 2 - 18),
+    };
+  };
+
+  const nodeAtPoint = (point, excludeCode = "") => layout.nodes.find((node) => {
+    const code = nodeKey(node);
+    if (code === excludeCode) return false;
+    return (
+      point.x >= node.mesh_px_x - layout.nodeWidth / 2
+      && point.x <= node.mesh_px_x + layout.nodeWidth / 2
+      && point.y >= node.mesh_px_y - layout.nodeHeight / 2
+      && point.y <= node.mesh_px_y + layout.nodeHeight / 2
+    );
+  });
+
+  const nodeFromPointerEvent = (event, excludeCode = "") => {
+    const element = document.elementFromPoint(event.clientX, event.clientY)?.closest?.(".diagram-node");
+    const code = element?.dataset?.nodeCode;
+    if (code && code !== excludeCode) {
+      return layout.nodeMap.get(code) || null;
+    }
+    return nodeAtPoint(clientToDiagram(event), excludeCode) || null;
+  };
+
+  const zoomAround = (clientX, clientY, factor) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setView((current) => {
+      const nextScale = clampNumber(current.scale * factor, 0.2, 2.4);
+      const pointerX = clientX - rect.left;
+      const pointerY = clientY - rect.top;
+      const diagramX = (pointerX - current.x) / current.scale;
+      const diagramY = (pointerY - current.y) / current.scale;
+      return {
+        scale: nextScale,
+        x: pointerX - diagramX * nextScale,
+        y: pointerY - diagramY * nextScale,
+      };
+    });
+  };
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    const handleWheel = (event) => {
+      if (isTypingTarget(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      zoomAround(event.clientX, event.clientY, event.deltaY < 0 ? 1.12 : 0.88);
+    };
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleWheel);
+  });
+
+  const handleViewportPointerDown = (event) => {
+    if (event.button !== 0 || event.target.closest?.(".diagram-node") || event.target.closest?.(".diagram-edge")) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setPanning({
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      viewX: view.x,
+      viewY: view.y,
+    });
+  };
+
+  const handlePointerMove = (event) => {
+    if (connectionDraft) {
+      const point = clientToDiagram(event);
+      const target = nodeFromPointerEvent(event, connectionDraft.fromCode);
+      setConnectionTargetCode(target ? nodeKey(target) : "");
+      setConnectionDraft({ ...connectionDraft, point });
+      return;
+    }
+    if (draggingNode) {
+      const moved = draggingNode.moved || Math.abs(event.clientX - draggingNode.clientX) > 3 || Math.abs(event.clientY - draggingNode.clientY) > 3;
+      const point = clientToDiagram(event);
+      setDraggingNode({ ...draggingNode, moved, point });
+      onNodeDrag?.(draggingNode.code, point);
+      return;
+    }
+    if (panning) {
+      setView((current) => ({
+        ...current,
+        x: panning.viewX + event.clientX - panning.clientX,
+        y: panning.viewY + event.clientY - panning.clientY,
+      }));
+    }
+  };
+
+  const handlePointerUp = async (event) => {
+    viewportRef.current?.releasePointerCapture?.(event.pointerId);
+    if (connectionDraft) {
+      const point = connectionDraft.point || clientToDiagram(event);
+      const target = nodeFromPointerEvent(event, connectionDraft.fromCode);
+      const fromCode = connectionDraft.fromCode;
+      setConnectionDraft(null);
+      setConnectionTargetCode("");
+      if (target) {
+        await onConnectNodes?.(fromCode, nodeKey(target));
+      }
+      return;
+    }
+    if (draggingNode) {
+      const node = layout.nodeMap.get(draggingNode.code);
+      const point = draggingNode.point || clientToDiagram(event);
+      const moved = draggingNode.moved || Math.abs(event.clientX - draggingNode.clientX) > 3 || Math.abs(event.clientY - draggingNode.clientY) > 3;
+      setDraggingNode(null);
+      if (moved) {
+        await onNodeDragEnd?.(draggingNode.code, point);
+      } else if (node) {
+        onNodeSelect?.(node);
+      }
+      return;
+    }
+    if (panning) setPanning(null);
+  };
+
+  const handleNodePointerDown = (event, node) => {
+    if (!nodesInteractive) return;
+    event.stopPropagation();
+    if (!editable || connectFrom) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDraggingNode({
+      code: nodeKey(node),
+      clientX: event.clientX,
+      clientY: event.clientY,
+      moved: false,
+      point: { x: node.mesh_px_x, y: node.mesh_px_y },
+    });
+    onNodeSelect?.(node);
+  };
+
+  const startConnection = (event, node, side) => {
+    if (!editable || !onConnectNodes) return;
+    event.preventDefault();
+    event.stopPropagation();
+    viewportRef.current?.setPointerCapture?.(event.pointerId);
+    const start = connectionAnchor(node, layout, side);
+    setConnectionDraft({
+      fromCode: nodeKey(node),
+      side,
+      start,
+      point: start,
+    });
+    setConnectionTargetCode("");
+    onNodeSelect?.(node);
+  };
+
+  const zoomButton = (factor) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    zoomAround(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+  };
+
+  return (
+    <div
+      className={`diagram-viewport ${className}`}
+      ref={viewportRef}
+      onPointerDown={handleViewportPointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+    >
+      <div
+        className="diagram-controls"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button type="button" onClick={() => zoomButton(0.86)} aria-label="Zoom out">-</button>
+        <span>{Math.round(view.scale * 100)}%</span>
+        <button type="button" onClick={() => zoomButton(1.16)} aria-label="Zoom in">+</button>
+        <button type="button" onClick={fitToViewport}>Fit</button>
+      </div>
+      <div
+        className="diagram-stage"
+        style={{
+          width: `${layout.width}px`,
+          height: `${layout.height}px`,
+          transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+        }}
+      >
+        <svg className="diagram-svg" viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden="true">
+          <defs>
+            <pattern id={`${markerId.current}-grid`} width="24" height="24" patternUnits="userSpaceOnUse">
+              <path d="M 24 0 L 0 0 0 24" />
+            </pattern>
+            <marker id={markerId.current} viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" />
+            </marker>
+          </defs>
+          <rect className="diagram-grid-fill" x="0" y="0" width={layout.width} height={layout.height} fill={`url(#${markerId.current}-grid)`} />
+          {layout.bands.map((band) => (
+            <g className="diagram-band" key={band.stage}>
+              <rect x={band.x} y={band.y} width={band.width} height={band.height} rx="10" />
+              <text x={band.x + 16} y={band.y + 24}>{band.stage}</text>
+            </g>
+          ))}
+          {visibleEdges.map((edge, index) => {
+            const from = layout.nodeMap.get(String(edge.from_code));
+            const to = layout.nodeMap.get(String(edge.to_code));
+            if (!from || !to) return null;
+            const edgeId = edgeKey(edge);
+            return (
+              <path
+                className={`diagram-edge ${selectedEdgeId === edgeId ? "selected" : ""} ${onEdgeSelect ? "selectable" : ""}`}
+                key={edgeId}
+                d={diagramEdgePath(from, to, layout, index)}
+                markerEnd={`url(#${markerId.current})`}
+                onPointerDown={(event) => {
+                  if (!onEdgeSelect) return;
+                  event.stopPropagation();
+                  onEdgeSelect(edge);
+                }}
+              />
+            );
+          })}
+          {connectionDraft && (
+            <path
+              className={`diagram-connection-preview ${connectionTargetCode ? "valid" : ""}`}
+              d={diagramPointPath(connectionDraft.start, connectionDraft.point)}
+              markerEnd={`url(#${markerId.current})`}
+            />
+          )}
+        </svg>
+        {layout.nodes.map((node) => {
+          const NodeTag = nodesInteractive ? "button" : "div";
+          const code = nodeKey(node);
+          return (
+            <NodeTag
+              key={code}
+              type={nodesInteractive ? "button" : undefined}
+              className={`mesh-node diagram-node ${editable ? "admin" : ""} ${activeNodeCode === code ? "active" : ""} ${connectFrom === code ? "source" : ""}`}
+              data-node-code={code}
+              style={{
+                left: `${node.mesh_px_x}px`,
+                top: `${node.mesh_px_y}px`,
+                width: `${layout.nodeWidth}px`,
+                minHeight: `${layout.nodeHeight}px`,
+                "--node-accent": nodeAccentColor(node),
+                "--node-accent-soft": `${nodeAccentColor(node)}24`,
+                "--node-overlay-opacity": node.paint_tag || node.tag_label || node.material_tag ? 0.42 : 0.12,
+              }}
+              onPointerDown={(event) => handleNodePointerDown(event, node)}
+              onDragOver={(event) => {
+                if (!editable || !onTagDrop) return;
+                event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (!editable || !onTagDrop) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const text = event.dataTransfer.getData("application/json") || event.dataTransfer.getData("text/plain");
+                if (!text) return;
+                try {
+                  onTagDrop(node, JSON.parse(text));
+                } catch {
+                  onTagDrop(node, { label: text, color: "#67e8f9" });
+                }
+              }}
+              onClick={(event) => {
+                if (!nodesInteractive) return;
+                event.stopPropagation();
+                if (nodesInteractive && (!editable || connectFrom)) onNodeSelect?.(node);
+              }}
+            >
+              <span>{nodeTagLabel(node)} · {node.stage || "stage"}</span>
+              <strong>{nodeDisplayName(node)}</strong>
+              <small>{node.city || node.role || node.facility_type || "--"}</small>
+              {editable && onConnectNodes && ["left", "right", "top", "bottom"].map((side) => (
+                <i
+                  key={side}
+                  className={`connector-handle ${side} ${connectionTargetCode === code ? "snap-active" : ""}`}
+                  title={`Drag ${side} connector`}
+                  onPointerDown={(event) => startConnection(event, node, side)}
+                  onClick={(event) => event.stopPropagation()}
+                />
+              ))}
+            </NodeTag>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FullScreenModal({ title, subtitle, onClose, children }) {
+  const shellRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    let nativeFullscreenActive = Boolean(document.fullscreenElement);
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape" || isTypingTarget(event.target)) return;
+      if (document.fullscreenElement) return;
+      onCloseRef.current();
+    };
+    const handleFullscreenChange = () => {
+      if (nativeFullscreenActive && !document.fullscreenElement) onCloseRef.current();
+    };
+    document.body.classList.add("modal-open");
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    if (shell?.requestFullscreen && !document.fullscreenElement) {
+      shell.requestFullscreen()
+        .then(() => {
+          nativeFullscreenActive = true;
+        })
+        .catch(() => {
+          nativeFullscreenActive = false;
+        });
+    }
+    return () => {
+      document.body.classList.remove("modal-open");
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  return createPortal((
+    <div className="fullscreen-shell" ref={shellRef} role="dialog" aria-modal="true" aria-label={title}>
+      <header className="fullscreen-header">
+        <div>
+          <span className="eyebrow">{subtitle}</span>
+          <h2>{title}</h2>
+        </div>
+        <button type="button" className="close-action" onClick={onClose} aria-label="Close">Close</button>
+      </header>
+      {children}
+    </div>
+  ), document.body);
 }
 
 function RouteExplorer({ route, selectedModule, detail, t }) {
@@ -539,9 +1156,18 @@ function RouteMeshExplorer({ route, selectedModule, detail, t }) {
   const nodes = useMemo(() => route?.nodes || [], [route]);
   const edges = useMemo(() => route?.edges || [], [route]);
   const selectedModulePayload = detail.modules.find((module) => module.module_id === selectedModule);
-  const layerOptions = useMemo(() => ["ALL", ...Array.from(new Set(nodes.map((node) => node.tier).filter(Boolean)))], [nodes]);
+  const layerOptions = useMemo(() => {
+    const tags = Array.from(new Set(nodes.map((node) => nodeTagLabel(node)).filter(Boolean)));
+    const stages = Array.from(new Set(nodes.map((node) => node.stage).filter(Boolean)));
+    return [
+      { key: "ALL", label: t.layerAll },
+      ...tags.map((tag) => ({ key: `tag:${tag}`, label: tag })),
+      ...stages.map((stage) => ({ key: `stage:${stage}`, label: stage })),
+    ];
+  }, [nodes, t.layerAll]);
   const [layer, setLayer] = useState("ALL");
   const [activeNodeCode, setActiveNodeCode] = useState("");
+  const [showcaseOpen, setShowcaseOpen] = useState(false);
 
   useEffect(() => {
     setLayer("ALL");
@@ -549,20 +1175,28 @@ function RouteMeshExplorer({ route, selectedModule, detail, t }) {
   }, [selectedModule]);
 
   const visibleNodes = useMemo(() => {
-    const filtered = layer === "ALL" ? nodes : nodes.filter((node) => node.tier === layer);
-    return filtered.map((node, index) => ({
-      ...node,
-      mesh_x: clampCanvasPercent(node.mesh_x ?? 12 + (index % 5) * 18),
-      mesh_y: clampCanvasPercent(node.mesh_y ?? 16 + Math.floor(index / 5) * 18),
-    }));
+    if (layer === "ALL") return nodes;
+    if (layer.startsWith("tag:")) {
+      const tag = layer.slice(4);
+      return nodes.filter((node) => nodeTagLabel(node) === tag);
+    }
+    if (layer.startsWith("stage:")) {
+      const stage = layer.slice(6);
+      return nodes.filter((node) => node.stage === stage);
+    }
+    return nodes;
   }, [nodes, layer]);
   const visibleCodes = useMemo(() => new Set(visibleNodes.map(nodeKey)), [visibleNodes]);
   const visibleEdges = useMemo(
     () => edges.filter((edge) => visibleCodes.has(String(edge.from_code)) && visibleCodes.has(String(edge.to_code))),
     [edges, visibleCodes],
   );
-  const nodeMap = useMemo(() => new Map(visibleNodes.map((node) => [nodeKey(node), node])), [visibleNodes]);
-  const activeNode = nodeMap.get(activeNodeCode) || visibleNodes[0];
+  const activeNode = visibleNodes.find((node) => nodeKey(node) === activeNodeCode) || visibleNodes[0];
+  const activeCode = activeNode ? nodeKey(activeNode) : "";
+  const openShowcase = () => {
+    requestBrowserFullscreen();
+    setShowcaseOpen(true);
+  };
 
   const evidence = selectedModule === "whole"
     ? detail.evidence.slice(0, 5)
@@ -594,47 +1228,34 @@ function RouteMeshExplorer({ route, selectedModule, detail, t }) {
       </div>
       <div className="layer-filter">
         {layerOptions.map((option) => (
-          <button key={option} className={layer === option ? "active" : ""} onClick={() => setLayer(option)}>
-            {option === "ALL" ? t.layerAll : option}
+          <button key={option.key} className={layer === option.key ? "active" : ""} onClick={() => setLayer(option.key)}>
+            {option.label}
           </button>
         ))}
       </div>
 
-      <div className="route-mesh" key={`${selectedModule}-${layer}`}>
-        <svg className="mesh-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <marker id="meshArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" />
-            </marker>
-          </defs>
-          {visibleEdges.map((edge) => {
-            const from = nodeMap.get(String(edge.from_code));
-            const to = nodeMap.get(String(edge.to_code));
-            if (!from || !to) return null;
-            return (
-              <line
-                key={edgeKey(edge)}
-                x1={from.mesh_x}
-                y1={from.mesh_y}
-                x2={to.mesh_x}
-                y2={to.mesh_y}
-                markerEnd="url(#meshArrow)"
-              />
-            );
-          })}
-        </svg>
-        {visibleNodes.map((node) => (
-          <button
-            key={nodeKey(node)}
-            className={`mesh-node ${activeNode?.facility_code === node.facility_code ? "active" : ""}`}
-            style={{ left: `${node.mesh_x}%`, top: `${node.mesh_y}%` }}
-            onClick={() => setActiveNodeCode(nodeKey(node))}
-          >
-            <span>{node.tier || "node"} · {node.stage || "stage"}</span>
-            <strong>{nodeDisplayName(node)}</strong>
-            <small>{node.city || "--"} · {node.role || node.facility_type || "--"}</small>
-          </button>
-        ))}
+      <div
+        className="route-thumbnail"
+        role="button"
+        tabIndex={0}
+        onClick={openShowcase}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openShowcase();
+          }
+        }}
+      >
+        <DiagramCanvas
+          route={route}
+          nodes={visibleNodes}
+          edges={visibleEdges}
+          activeNodeCode={activeCode}
+          nodesInteractive={false}
+          className="diagram-thumbnail"
+          fitPadding={20}
+        />
+        <span className="thumbnail-action">Open full screen</span>
       </div>
 
       <NodeDetail node={activeNode} t={t} />
@@ -654,7 +1275,59 @@ function RouteMeshExplorer({ route, selectedModule, detail, t }) {
         )}
         <span className="edge-count">{visibleEdges.length} {t.flowLinks}</span>
       </div>
+      {showcaseOpen && (
+        <RouteShowcase
+          route={route}
+          nodes={visibleNodes}
+          edges={visibleEdges}
+          activeNode={activeNode}
+          activeNodeCode={activeCode}
+          setActiveNodeCode={setActiveNodeCode}
+          title={selectedModule === "whole" ? t.wholeRoute : t.moduleRoute}
+          evidence={evidence}
+          variableSet={variableSet}
+          t={t}
+          onClose={() => setShowcaseOpen(false)}
+        />
+      )}
     </section>
+  );
+}
+
+function RouteShowcase({ route, nodes, edges, activeNode, activeNodeCode, setActiveNodeCode, title, evidence, variableSet, t, onClose }) {
+  return (
+    <FullScreenModal title={title} subtitle={t.routeSwitch} onClose={onClose}>
+      <div className="fullscreen-content showcase-content">
+        <DiagramCanvas
+          route={route}
+          nodes={nodes}
+          edges={edges}
+          activeNodeCode={activeNodeCode}
+          onNodeSelect={(node) => setActiveNodeCode(nodeKey(node))}
+          className="diagram-fullscreen"
+          fitPadding={68}
+        />
+        <aside className="fullscreen-inspector">
+          <NodeDetail node={activeNode} t={t} />
+          <EvidenceMatrix variables={variableSet} />
+          <div className="proof-panel">
+            <h3>{t.shopperLearns}</h3>
+            {typeof evidence === "string" ? (
+              <p>{evidence}</p>
+            ) : Array.isArray(evidence) && evidence.length ? (
+              evidence.map((row) => (
+                <p key={row.evidence_id || `${row.stage}-${row.evidence}`}>
+                  <strong>{row.stage}</strong> · {formatDate(row.time)} · {row.metric}
+                </p>
+              ))
+            ) : (
+              <p>{t.nodeHint}</p>
+            )}
+            <span className="edge-count">{edges.length} {t.flowLinks}</span>
+          </div>
+        </aside>
+      </div>
+    </FullScreenModal>
   );
 }
 
@@ -668,8 +1341,8 @@ function NodeDetail({ node, t }) {
       </div>
       <p>{node.visible_value || t.nodeHint}</p>
       <div className="node-detail-grid">
-        <small>{fieldLabel(t, "tier")}: {node.tier || "--"}</small>
         <small>{fieldLabel(t, "city")}: {node.city || "--"}</small>
+        <small>{fieldLabel(t, "paint_tag")}: {nodeTagLabel(node)}</small>
         <small>{fieldLabel(t, "facility_type")}: {node.facility_type || "--"}</small>
         <small>{fieldLabel(t, "role")}: {node.role || "--"}</small>
       </div>
@@ -817,7 +1490,6 @@ function defaultDetailRecord(sectionKey, detail) {
       module_id: `custom-module-${now}`,
       module_name: "New product component",
       module_category: "Editable component",
-      supplier_tier: "L2",
       supplier_city: "Editable city",
       lot_code: `LOT-${now}`,
       received_on: new Date().toISOString().slice(0, 10),
@@ -833,7 +1505,8 @@ function defaultDetailRecord(sectionKey, detail) {
       display_name: "New supply-chain checkpoint",
       facility_name: "New supply-chain checkpoint",
       stage: "Ingredient source",
-      tier: "L2",
+      paint_tag: "Raw material",
+      paint_color: "#67e8f9",
       facility_type: "editable_checkpoint",
       city: "Editable city",
       role: "Editable role",
@@ -889,7 +1562,7 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
       label: t.admin.sections.modules,
       idField: "module_id",
       items: detail.modules,
-      fields: ["module_name", "module_category", "supplier_tier", "supplier_city", "lot_code", "received_on", "inspection_score", "traceability_completeness", "temperature_excursion_minutes", "plain_language"],
+      fields: ["module_name", "module_category", "supplier_city", "lot_code", "received_on", "inspection_score", "traceability_completeness", "temperature_excursion_minutes", "plain_language"],
       labelOf: (item) => `${moduleDisplayName(item)} · ${item.module_category || ""}`,
     },
     {
@@ -897,8 +1570,8 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
       label: t.admin.sections.route_nodes,
       idField: "facility_code",
       items: detail.route.nodes,
-      fields: ["stage", "tier", "facility_code", "display_name", "facility_name", "facility_type", "city", "role", "visible_value", "mesh_x", "mesh_y"],
-      labelOf: (item) => `${item.tier || "L?"} · ${nodeDisplayName(item)} · ${item.city || ""}`,
+      fields: ["stage", "paint_tag", "paint_color", "facility_code", "display_name", "facility_name", "facility_type", "city", "role", "visible_value", "mesh_x", "mesh_y"],
+      labelOf: (item) => `${nodeTagLabel(item)} · ${nodeDisplayName(item)} · ${item.city || ""}`,
     },
     {
       key: "route_edges",
@@ -1014,6 +1687,7 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
           setSelectedId={setSelectedId}
           onSaved={onSaved}
           setStatus={setStatus}
+          t={t}
         />
       )}
       <label className="field">
@@ -1042,11 +1716,14 @@ function LayerEditor({ sku, detail, t, onSaved, setStatus }) {
   );
 }
 
-function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus }) {
-  const canvasRef = useRef(null);
+function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus, t }) {
   const [nodes, setNodes] = useState(detail.route.nodes || []);
   const [connectFrom, setConnectFrom] = useState("");
-  const [dragging, setDragging] = useState(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState("");
+  const [selectedTag, setSelectedTag] = useState("Raw material");
+  const [paintMode, setPaintMode] = useState(false);
+  const [tagDraft, setTagDraft] = useState({ label: "", color: "#67e8f9" });
+  const [editorOpen, setEditorOpen] = useState(false);
 
   useEffect(() => {
     setNodes(detail.route.nodes || []);
@@ -1054,16 +1731,26 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
 
   const edges = detail.route.edges || [];
   const selectedNode = nodes.find((node) => node.facility_code === selectedId) || nodes[0];
+  const selectedEdge = edges.find((edge) => edgeKey(edge) === selectedEdgeId);
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [nodeKey(node), node])), [nodes]);
+  const tagPalette = useMemo(() => mergeTagPalettes(
+    DEFAULT_TAGS,
+    detail.overview?.flow_tags || [],
+    nodes.map((node) => ({ label: nodeTagLabel(node), color: nodeAccentColor(node) })),
+  ), [detail.overview?.flow_tags, nodes]);
+  const activeTag = tagPalette.find((tag) => tag.label === selectedTag) || tagPalette[0] || DEFAULT_TAGS[0];
 
-  const pointFromEvent = (event) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return { x: 50, y: 50 };
-    return {
-      x: clampCanvasPercent(((event.clientX - rect.left) / rect.width) * 100),
-      y: clampCanvasPercent(((event.clientY - rect.top) / rect.height) * 100),
-    };
-  };
+  useEffect(() => {
+    if (!tagPalette.some((tag) => tag.label === selectedTag)) {
+      setSelectedTag(tagPalette[0]?.label || DEFAULT_TAGS[0].label);
+    }
+  }, [tagPalette, selectedTag]);
+
+  useEffect(() => {
+    if (selectedEdgeId && !edges.some((edge) => edgeKey(edge) === selectedEdgeId)) {
+      setSelectedEdgeId("");
+    }
+  }, [edges, selectedEdgeId]);
 
   const patchNode = async (node, updates) => {
     await api(`/api/admin/products/${sku}/detail`, {
@@ -1071,6 +1758,28 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
       body: JSON.stringify({
         section: "route_nodes",
         item_id: String(node.facility_code),
+        updates,
+      }),
+    });
+  };
+
+  const patchEdge = async (edge, updates) => {
+    await api(`/api/admin/products/${sku}/detail`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        section: "route_edges",
+        item_id: edgeKey(edge),
+        updates,
+      }),
+    });
+  };
+
+  const patchOverview = async (updates) => {
+    await api(`/api/admin/products/${sku}/detail`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        section: "overview",
+        item_id: null,
         updates,
       }),
     });
@@ -1092,6 +1801,7 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
 
   const deleteNode = async () => {
     if (!selectedNode) return;
+    setSelectedEdgeId("");
     setStatus("Deleting node and connected links...");
     await api(`/api/admin/products/${sku}/detail/route_nodes/${encodeURIComponent(selectedNode.facility_code)}`, {
       method: "DELETE",
@@ -1101,35 +1811,135 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
     await onSaved();
   };
 
+  const hasConnector = (fromCode, toCode, exceptEdgeId = "") => edges.some((edge) => (
+    edgeKey(edge) !== exceptEdgeId
+    && String(edge.from_code) === String(fromCode)
+    && String(edge.to_code) === String(toCode)
+  ));
+
+  const hasConnectorPair = (fromCode, toCode, exceptEdgeId = "") => edges.some((edge) => {
+    if (edgeKey(edge) === exceptEdgeId) return false;
+    const edgeFrom = String(edge.from_code);
+    const edgeTo = String(edge.to_code);
+    return (
+      (edgeFrom === String(fromCode) && edgeTo === String(toCode))
+      || (edgeFrom === String(toCode) && edgeTo === String(fromCode))
+    );
+  });
+
+  const deleteSelectedEdge = async () => {
+    if (!selectedEdge) return;
+    setStatus("Deleting selected connector...");
+    await api(`/api/admin/products/${sku}/detail/route_edges/${encodeURIComponent(edgeKey(selectedEdge))}`, {
+      method: "DELETE",
+    });
+    setSelectedEdgeId("");
+    setStatus("Connector deleted.");
+    await onSaved();
+  };
+
+  const reverseSelectedEdge = async () => {
+    if (!selectedEdge) return;
+    if (hasConnector(selectedEdge.to_code, selectedEdge.from_code, edgeKey(selectedEdge))) {
+      setStatus("A connector with that direction already exists.");
+      return;
+    }
+    const from = nodeMap.get(String(selectedEdge.to_code));
+    const to = nodeMap.get(String(selectedEdge.from_code));
+    setStatus("Reversing arrow direction...");
+    try {
+      await patchEdge(selectedEdge, {
+        from_code: selectedEdge.to_code,
+        to_code: selectedEdge.from_code,
+        flow: `${nodeDisplayName(from)} to ${nodeDisplayName(to)}`,
+        traceability: `${selectedEdge.to_code} -> ${selectedEdge.from_code}`,
+      });
+      setStatus("Arrow direction reversed.");
+      await onSaved();
+    } catch (error) {
+      setStatus("A connector between those two nodes already exists.");
+    }
+  };
+
   const addEdge = async (fromCode, toCode) => {
     if (!fromCode || !toCode || fromCode === toCode) return;
+    if (hasConnectorPair(fromCode, toCode)) {
+      setStatus("Those two nodes are already connected. Select the line to reverse or delete it.");
+      setConnectFrom("");
+      return;
+    }
     const from = nodeMap.get(fromCode);
     const to = nodeMap.get(toCode);
     setStatus("Creating link...");
-    await api(`/api/admin/products/${sku}/detail`, {
-      method: "POST",
-      body: JSON.stringify({
-        section: "route_edges",
-        item: {
-          from_code: fromCode,
-          to_code: toCode,
-          flow: `${nodeDisplayName(from)} to ${nodeDisplayName(to)}`,
-          stage: "merchant_drawn_link",
-          evidence: `manual-link-${Date.now()}`,
-          metric: "editable lead time | quantity | handoff status",
-          quality_risk: "editable risk, release, or exception note",
-          temperature: "editable temperature band",
-          traceability: "merchant-defined relationship",
-        },
-      }),
-    });
-    setConnectFrom("");
-    setStatus("Link created.");
+    try {
+      const result = await api(`/api/admin/products/${sku}/detail`, {
+        method: "POST",
+        body: JSON.stringify({
+          section: "route_edges",
+          item: {
+            from_code: fromCode,
+            to_code: toCode,
+            flow: `${nodeDisplayName(from)} to ${nodeDisplayName(to)}`,
+            stage: "merchant_drawn_link",
+            evidence: `manual-link-${Date.now()}`,
+            metric: "editable lead time | quantity | handoff status",
+            quality_risk: "editable risk, release, or exception note",
+            temperature: "editable temperature band",
+            traceability: "merchant-defined relationship",
+          },
+        }),
+      });
+      setConnectFrom("");
+      setSelectedEdgeId(result.item_id || "");
+      setStatus("Link created.");
+      await onSaved();
+    } catch (error) {
+      setConnectFrom("");
+      setStatus("Those two nodes are already connected.");
+    }
+  };
+
+  const createTag = async () => {
+    const label = tagDraft.label.trim();
+    if (!label) return;
+    const nextTag = { label, color: tagDraft.color || "#67e8f9" };
+    const nextTags = mergeTagPalettes(detail.overview?.flow_tags || [], tagPalette, nextTag);
+    setStatus("Saving tag...");
+    await patchOverview({ flow_tags: nextTags });
+    setSelectedTag(label);
+    setTagDraft({ label: "", color: nextTag.color });
+    setStatus("Tag saved. Paint nodes with it from the full-screen editor.");
+    await onSaved();
+  };
+
+  const paintNode = async (node) => {
+    if (!node || !activeTag) return;
+    await paintNodeWithTag(node, activeTag);
+  };
+
+  const paintNodeWithTag = async (node, tag) => {
+    const normalized = normalizeTag(tag);
+    if (!node || !normalized) return;
+    const code = nodeKey(node);
+    setNodes((current) => current.map((item) => (
+      nodeKey(item) === code ? { ...item, paint_tag: normalized.label, paint_color: normalized.color } : item
+    )));
+    setStatus(`Painting ${nodeDisplayName(node)} as ${normalized.label}...`);
+    await patchNode(node, { paint_tag: normalized.label, paint_color: normalized.color });
+    setSelectedId(code);
+    setSelectedEdgeId("");
+    setSelectedTag(normalized.label);
+    setStatus("Node tag applied.");
     await onSaved();
   };
 
   const handleNodeClick = async (node) => {
     const code = nodeKey(node);
+    setSelectedEdgeId("");
+    if (paintMode) {
+      await paintNode(node);
+      return;
+    }
     if (!connectFrom) {
       setSelectedId(code);
       return;
@@ -1137,88 +1947,228 @@ function MeshEditor({ sku, detail, selectedId, setSelectedId, onSaved, setStatus
     await addEdge(connectFrom, code);
   };
 
-  const handlePointerDown = (event, node) => {
-    if (connectFrom) return;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    setSelectedId(nodeKey(node));
-    setDragging({ code: nodeKey(node), moved: false });
-  };
-
-  const handlePointerMove = (event) => {
-    if (!dragging) return;
-    const point = pointFromEvent(event);
-    setDragging({ ...dragging, moved: true, point });
+  const moveNode = (code, point) => {
+    setSelectedEdgeId("");
     setNodes((current) => current.map((node) => (
-      nodeKey(node) === dragging.code ? { ...node, mesh_x: point.x, mesh_y: point.y } : node
+      nodeKey(node) === code ? { ...node, mesh_px_x: point.x, mesh_px_y: point.y, layout_locked: true } : node
     )));
   };
 
-  const handlePointerUp = async () => {
-    if (!dragging) return;
-    const node = nodes.find((item) => nodeKey(item) === dragging.code);
-    const point = dragging.point || { x: node?.mesh_x, y: node?.mesh_y };
-    setDragging(null);
-    if (node && point.x != null && point.y != null) {
-      await patchNode(node, { mesh_x: Number(point.x).toFixed(2), mesh_y: Number(point.y).toFixed(2) });
-      await onSaved();
-    }
+  const saveNodePosition = async (code, point) => {
+    const node = nodes.find((item) => nodeKey(item) === code);
+    if (!node || point.x == null || point.y == null) return;
+    setStatus("Saving node position...");
+    await patchNode(node, {
+      mesh_px_x: Number(point.x).toFixed(2),
+      mesh_px_y: Number(point.y).toFixed(2),
+      layout_locked: true,
+    });
+    setStatus("Node position saved.");
+    await onSaved();
   };
 
-  return (
-    <div className="mesh-editor">
-      <div className="mesh-toolbar">
-        <button onClick={addNode}>Add node</button>
-        <button
-          className={connectFrom ? "active" : ""}
-          onClick={() => setConnectFrom(connectFrom ? "" : nodeKey(selectedNode))}
-          disabled={!selectedNode}
-        >
-          {connectFrom ? "Pick target node" : "Connect from selected"}
-        </button>
-        <button className="danger-action" onClick={deleteNode} disabled={!selectedNode}>Delete node</button>
-      </div>
-      <div
-        className="mesh-editor-canvas"
-        ref={canvasRef}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+  const autoLayoutNodes = async () => {
+    if (!nodes.length) return;
+    setStatus("Applying automatic layout...");
+    const layout = buildDiagramLayout(nodes, { preferSaved: false, routeLayout: detail.route.layout });
+    setNodes(layout.nodes.map((node) => ({ ...node, layout_locked: false })));
+    await Promise.all(layout.nodes.map((node) => patchNode(node, {
+      mesh_px_x: Number(node.mesh_px_x).toFixed(2),
+      mesh_px_y: Number(node.mesh_px_y).toFixed(2),
+      layout_locked: false,
+    })));
+    setStatus("Automatic layout applied.");
+    await onSaved();
+  };
+
+  const renderToolbar = (insideModal = false) => (
+    <div className="mesh-toolbar">
+      <button type="button" onClick={addNode}>Add node</button>
+      <button
+        type="button"
+        className={connectFrom ? "active" : ""}
+        onClick={() => setConnectFrom(connectFrom ? "" : nodeKey(selectedNode))}
+        disabled={!selectedNode}
       >
-        <svg className="mesh-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <marker id="adminMeshArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" />
-            </marker>
-          </defs>
-          {edges.map((edge) => {
-            const from = nodeMap.get(String(edge.from_code));
-            const to = nodeMap.get(String(edge.to_code));
-            if (!from || !to) return null;
-            return (
-              <line
-                key={edgeKey(edge)}
-                x1={clampCanvasPercent(from.mesh_x)}
-                y1={clampCanvasPercent(from.mesh_y)}
-                x2={clampCanvasPercent(to.mesh_x)}
-                y2={clampCanvasPercent(to.mesh_y)}
-                markerEnd="url(#adminMeshArrow)"
-              />
-            );
-          })}
-        </svg>
-        {nodes.map((node) => (
+        {connectFrom ? "Pick target node" : "Connect from selected"}
+      </button>
+      <button type="button" onClick={autoLayoutNodes}>Auto layout</button>
+      <button type="button" onClick={reverseSelectedEdge} disabled={!selectedEdge}>Reverse arrow</button>
+      <button type="button" className="danger-action" onClick={deleteSelectedEdge} disabled={!selectedEdge}>Delete line</button>
+      {!insideModal && (
+        <button
+          type="button"
+          onClick={() => {
+            requestBrowserFullscreen();
+            setEditorOpen(true);
+          }}
+        >
+          Full-screen edit
+        </button>
+      )}
+      <button type="button" className="danger-action" onClick={deleteNode} disabled={!selectedNode}>Delete node</button>
+    </div>
+  );
+
+  const renderTagTools = () => (
+    <div className="tag-toolbar">
+      <div className="tag-palette" aria-label="Node tags">
+        {tagPalette.map((tag) => (
           <button
-            key={nodeKey(node)}
-            className={`mesh-node admin ${selectedNode?.facility_code === node.facility_code ? "active" : ""} ${connectFrom === node.facility_code ? "source" : ""}`}
-            style={{ left: `${clampCanvasPercent(node.mesh_x)}%`, top: `${clampCanvasPercent(node.mesh_y)}%` }}
-            onClick={() => handleNodeClick(node)}
-            onPointerDown={(event) => handlePointerDown(event, node)}
+            type="button"
+            draggable
+            key={tag.label}
+            className={selectedTag === tag.label ? "active" : ""}
+            onClick={() => setSelectedTag(tag.label)}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "copy";
+              event.dataTransfer.setData("application/json", JSON.stringify(tag));
+              event.dataTransfer.setData("text/plain", tag.label);
+            }}
           >
-            <span>{node.tier || "node"} · {node.stage || "stage"}</span>
-            <strong>{nodeDisplayName(node)}</strong>
+            <span style={{ background: tag.color }} />
+            {tag.label}
           </button>
         ))}
       </div>
+      <div className="tag-create">
+        <input
+          value={tagDraft.label}
+          placeholder="New tag"
+          onChange={(event) => setTagDraft({ ...tagDraft, label: event.target.value })}
+        />
+        <input
+          type="color"
+          value={tagDraft.color}
+          aria-label="Tag color"
+          onChange={(event) => setTagDraft({ ...tagDraft, color: event.target.value })}
+        />
+        <button type="button" onClick={createTag}>Add tag</button>
+        <button type="button" className={paintMode ? "active" : ""} onClick={() => setPaintMode(!paintMode)}>
+          {paintMode ? "Painting" : "Paint nodes"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const inspector = (
+    <aside className="fullscreen-inspector editor-inspector">
+      <NodeDetail node={selectedNode} t={t} />
+      <div className="selected-edge-panel">
+        <span className="eyebrow">Selected connector</span>
+        {selectedEdge ? (
+          <>
+            <strong>{nodeDisplayName(nodeMap.get(String(selectedEdge.from_code)))} → {nodeDisplayName(nodeMap.get(String(selectedEdge.to_code)))}</strong>
+            <p>{selectedEdge.flow || selectedEdge.metric || "Editable flow connector"}</p>
+            <div className="line-actions">
+              <button type="button" onClick={reverseSelectedEdge}>Reverse arrow</button>
+              <button type="button" className="danger-action" onClick={deleteSelectedEdge}>Delete line</button>
+            </div>
+          </>
+        ) : (
+          <p>Drag a connector handle to draw a line, or click an existing line to edit its direction.</p>
+        )}
+      </div>
+      <div className="editor-edge-list">
+        <span className="eyebrow">Visible links</span>
+        {edges.slice(0, 10).map((edge) => (
+          <button
+            key={edgeKey(edge)}
+            type="button"
+            className={selectedEdgeId === edgeKey(edge) ? "active" : ""}
+            onClick={() => setSelectedEdgeId(edgeKey(edge))}
+          >
+            <strong>{nodeDisplayName(nodeMap.get(String(edge.from_code)))}</strong>
+            <span>{nodeDisplayName(nodeMap.get(String(edge.to_code)))}</span>
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+
+  const activeNodeCode = selectedNode ? nodeKey(selectedNode) : "";
+
+  useEffect(() => {
+    if (!editorOpen) return undefined;
+    const handleKeyDown = (event) => {
+      if (isTypingTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if (key === "delete" || key === "backspace") {
+        event.preventDefault();
+        if (selectedEdge) {
+          deleteSelectedEdge();
+        } else {
+          deleteNode();
+        }
+      }
+      if (event.ctrlKey && key === "r") {
+        event.preventDefault();
+        reverseSelectedEdge();
+      }
+      if (event.ctrlKey && key === "l") {
+        event.preventDefault();
+        setConnectFrom(connectFrom ? "" : activeNodeCode);
+      }
+      if (event.ctrlKey && key === "a") {
+        event.preventDefault();
+        autoLayoutNodes();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [editorOpen, selectedEdge, selectedNode, connectFrom, activeNodeCode]);
+
+  return (
+    <div className="mesh-editor">
+      {renderToolbar(false)}
+      {renderTagTools()}
+      <DiagramCanvas
+        route={detail.route}
+        nodes={nodes}
+        edges={edges}
+        activeNodeCode={activeNodeCode}
+        onNodeSelect={handleNodeClick}
+        onTagDrop={paintNodeWithTag}
+        selectedEdgeId={selectedEdgeId}
+        onEdgeSelect={(edge) => {
+          setSelectedEdgeId(edgeKey(edge));
+          setConnectFrom("");
+        }}
+        connectFrom={connectFrom}
+        className="diagram-admin-preview"
+        fitPadding={24}
+      />
+      {editorOpen && (
+        <FullScreenModal title="Professional flow editor" subtitle="Merchant backend" onClose={() => setEditorOpen(false)}>
+          <div className="fullscreen-content editor-content">
+            <section className="fullscreen-diagram-panel">
+              {renderToolbar(true)}
+              {renderTagTools()}
+              <DiagramCanvas
+                route={detail.route}
+                nodes={nodes}
+                edges={edges}
+                activeNodeCode={activeNodeCode}
+                onNodeSelect={handleNodeClick}
+                onTagDrop={paintNodeWithTag}
+                selectedEdgeId={selectedEdgeId}
+                onEdgeSelect={(edge) => {
+                  setSelectedEdgeId(edgeKey(edge));
+                  setConnectFrom("");
+                }}
+                onConnectNodes={addEdge}
+                editable
+                connectFrom={connectFrom}
+                onNodeDrag={moveNode}
+                onNodeDragEnd={saveNodePosition}
+                className="diagram-editor-full"
+                fitPadding={72}
+              />
+            </section>
+            {inspector}
+          </div>
+        </FullScreenModal>
+      )}
       <p className="mesh-help">
         Canvas logic: add checkpoints, drag nodes to reshape the mesh, then connect two nodes to express supplier, QC, packaging, logistics, or retail handoffs.
       </p>

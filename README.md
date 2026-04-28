@@ -44,14 +44,14 @@ These fields follow the spirit of FDA FSMA 204 Critical Tracking Events / Key Da
 
 ## Current Capabilities
 
-- Models a multi-tier fresh-food supply network across L1, L2, L3, core plants, downstream nodes, and service providers.
+- Models an editable fresh-food flow graph across suppliers, plants, logistics, retail nodes, and service providers, with custom tags replacing fixed hierarchy levels.
 - Adds a product-first home tab where merchants can show product names and categories before users inspect a SKU-level supply route.
 - Reserves merchant media slots for product photo, origin image, quality certificate, and cold-chain log; icon placeholders are displayed until real merchant assets are uploaded.
 - Traces product batches back to supplier lots, inspections, material usage, and shipment legs.
 - Adds a clickable Network Mesh detail panel that exposes stage-level node data after selecting a facility.
 - Trains XGBoost-based risk and demand forecasting models.
 - Simulates disruption recovery with OR-Tools allocation logic.
-- Provides a browser-based customer frontend and merchant backend. Merchants can edit product facts and media; customers can inspect the whole-product route or click product modules such as cake base, cream, meat, dairy, packaging, or produce components.
+- Provides a browser-based customer frontend and merchant backend. Merchants can edit product facts, media, tagged graph nodes, and Visio-style route edges; customers can inspect the whole-product route or click product modules such as cake base, cream, meat, dairy, packaging, or produce components.
 - Pushes admin-side edits to the customer page through a WebSocket update channel, so the two browser views can run at the same time during the demo.
 - Generates report assets, UI screenshots, speaker scripts, and presentation evidence for coursework demonstration.
 
@@ -147,8 +147,8 @@ python .\app.py
 
 This launches:
 
-- Customer frontend: http://127.0.0.1:5173/
-- Merchant backend console: http://127.0.0.1:5173/admin
+- Customer frontend: http://127.0.0.1:8000/
+- Merchant backend console: http://127.0.0.1:8000/admin
 - API documentation: http://127.0.0.1:8000/docs
 
 You can also run the two layers manually in separate terminals:
@@ -168,13 +168,15 @@ npm run dev -- --host 127.0.0.1 --port 5173
 The rebuilt ENT105TC deck is available at:
 
 ```text
-outputs/oasis-finder-group9-ent105tc-web-v3/output.pptx
+outputs/oasis-finder-group9-ent105tc-bilingual-v4/output.pptx
 ```
 
-The matching read-aloud script is available at:
+The deck removes the intro-only cover page and includes a clickable live demo link on the browser architecture slide:
 
 ```text
-outputs/oasis-finder-group9-ent105tc-web-v3/speaker_script_web_v3_Rui_Zixiu.pdf
+http://127.0.0.1:8000
 ```
+
+It also includes a course knowledge map based on `ENT_结构化知识点整理_重构版.docx`, explicitly linking Week 2-8 concepts to the strategic question, evidence plan, qualitative coding, questionnaire signal, and mixed-method recommendation.
 
 The deck includes the reframed questionnaire logic, merchant value argument, browser frontend/backend workflow, screenshots, GitHub/open-source evidence, data-responsibility notes, and an eight-minute Rui Huang / Zixiu Wang speaker plan.

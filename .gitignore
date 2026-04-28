@@ -17,6 +17,7 @@ web/dist/
 build/
 dist/
 *.spec
+!OasisFinder.spec
 tmp/
 outputs/*/preview/
 outputs/*/verification/

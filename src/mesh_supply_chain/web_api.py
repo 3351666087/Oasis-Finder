@@ -161,16 +161,24 @@ def evidence_identity(row: dict[str, Any]) -> str:
 DETAIL_LIST_SECTIONS = {"modules", "route_nodes", "route_edges", "evidence"}
 DETAIL_SECTIONS = {"overview", *DETAIL_LIST_SECTIONS}
 
-STAGE_LAYOUT = {
-    "Raw material origin": (8, 18),
-    "Regional aggregation": (22, 30),
-    "Ingredient source": (34, 30),
-    "Quality / compliance gate": (44, 18),
-    "Processing / packing": (52, 42),
-    "Distribution center": (70, 34),
-    "Retail shelf": (88, 48),
-    "Logistics node": (76, 62),
-}
+STAGE_ORDER = [
+    "Raw material origin",
+    "Regional aggregation",
+    "Ingredient source",
+    "Quality / compliance gate",
+    "Processing / packing",
+    "Distribution center",
+    "Logistics node",
+    "Retail shelf",
+]
+FLOW_NODE_WIDTH = 218
+FLOW_NODE_HEIGHT = 98
+FLOW_PADDING_X = 150
+FLOW_PADDING_Y = 92
+FLOW_COLUMN_GAP = 330
+FLOW_ROW_GAP = 146
+FLOW_MIN_WIDTH = 1120
+FLOW_MIN_HEIGHT = 620
 
 def generated_code(sku_code: str, suffix: str) -> str:
     return f"{sku_code.lower()}::{suffix}"
@@ -246,6 +254,34 @@ def clamp_percent(value: float) -> float:
     return round(max(4.0, min(96.0, value)), 2)
 
 
+def number_or_none(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number) or math.isinf(number):
+        return None
+    return number
+
+
+def stage_rank(stage: Any) -> int:
+    text = str(stage or "")
+    try:
+        return STAGE_ORDER.index(text)
+    except ValueError:
+        return len(STAGE_ORDER)
+
+
+def node_tag_label(node: dict[str, Any]) -> str:
+    return str(
+        node.get("paint_tag")
+        or node.get("tag_label")
+        or node.get("material_tag")
+        or node.get("facility_type")
+        or "Node"
+    )
+
+
 def looks_abstract(value: Any) -> bool:
     text = str(value or "").strip()
     if not text:
@@ -303,18 +339,142 @@ def add_route_edge(edges_by_id: dict[str, dict[str, Any]], edge: dict[str, Any])
     edges_by_id.setdefault(cleaned["edge_id"], cleaned)
 
 
-def assign_mesh_layout(nodes: list[dict[str, Any]]) -> None:
-    stage_counts: dict[str, int] = {}
+def strip_tier_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    for node in payload.get("route", {}).get("nodes", []):
+        node.pop("tier", None)
+    for module in payload.get("modules", []):
+        module.pop("supplier_tier", None)
+        for node in module.get("route_nodes", []):
+            node.pop("tier", None)
+    return payload
+
+
+def dedupe_route_edges(edges: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    seen_pairs: set[tuple[str, str]] = set()
+    kept: list[dict[str, Any]] = []
+    duplicate_ids: list[str] = []
+    for edge in edges:
+        from_code = str(edge.get("from_code") or "")
+        to_code = str(edge.get("to_code") or "")
+        if not from_code or not to_code or from_code == to_code:
+            duplicate_ids.append(str(edge.get("edge_id") or edge_identity(edge)))
+            continue
+        pair = tuple(sorted([from_code, to_code]))
+        edge_id = str(edge.get("edge_id") or edge_identity(edge))
+        if pair in seen_pairs:
+            duplicate_ids.append(edge_id)
+            continue
+        seen_pairs.add(pair)
+        kept.append(edge)
+    return kept, duplicate_ids
+
+
+def assign_mesh_layout(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    groups: dict[str, list[dict[str, Any]]] = {}
     for node in nodes:
-        stage = str(node.get("stage") or "Ingredient source")
-        base_x, base_y = STAGE_LAYOUT.get(stage, (50, 50))
-        index = stage_counts.get(stage, 0)
-        stage_counts[stage] = index + 1
         node["display_name"] = node_title(node)
-        if node.get("mesh_x") in (None, ""):
-            node["mesh_x"] = clamp_percent(float(base_x) + ((index % 3) - 1) * 3)
-        if node.get("mesh_y") in (None, ""):
-            node["mesh_y"] = clamp_percent(float(base_y) + (index // 3) * 18 + (index % 3) * 10)
+        stage = str(node.get("stage") or "Ingredient source")
+        groups.setdefault(stage, []).append(node)
+
+    ordered_groups = sorted(
+        groups.items(),
+        key=lambda item: (
+            stage_rank(item[0]),
+            min(number_or_none(node.get("stage_order")) or 999 for node in item[1]),
+            item[0],
+        ),
+    )
+    for _, stage_nodes in ordered_groups:
+        stage_nodes.sort(
+            key=lambda node: (
+                node_tag_label(node),
+                number_or_none(node.get("mesh_y")) if number_or_none(node.get("mesh_y")) is not None else 999,
+                str(node.get("module_id") or ""),
+                node_title(node),
+            )
+        )
+
+    column_count = max(1, len(ordered_groups))
+    max_rows = max([len(stage_nodes) for _, stage_nodes in ordered_groups] or [1])
+    width = max(
+        FLOW_MIN_WIDTH,
+        (FLOW_PADDING_X * 2) + FLOW_NODE_WIDTH + ((column_count - 1) * FLOW_COLUMN_GAP),
+    )
+    height = max(
+        FLOW_MIN_HEIGHT,
+        (FLOW_PADDING_Y * 2) + FLOW_NODE_HEIGHT + ((max_rows - 1) * FLOW_ROW_GAP),
+    )
+    occupied: list[tuple[float, float, float, float]] = []
+    bands: list[dict[str, Any]] = []
+
+    def overlaps(x: float, y: float) -> bool:
+        left = x - FLOW_NODE_WIDTH / 2
+        right = x + FLOW_NODE_WIDTH / 2
+        top = y - FLOW_NODE_HEIGHT / 2
+        bottom = y + FLOW_NODE_HEIGHT / 2
+        for other_left, other_top, other_right, other_bottom in occupied:
+            if left < other_right and right > other_left and top < other_bottom and bottom > other_top:
+                return True
+        return False
+
+    for column_index, (stage, stage_nodes) in enumerate(ordered_groups):
+        column_x = FLOW_PADDING_X + (column_index * FLOW_COLUMN_GAP)
+        bands.append(
+            {
+                "stage": stage,
+                "x": round(column_x - (FLOW_NODE_WIDTH / 2) - 28, 2),
+                "y": 34,
+                "width": FLOW_NODE_WIDTH + 56,
+                "height": max(160, height - 68),
+            }
+        )
+        for row_index, node in enumerate(stage_nodes):
+            saved_x = number_or_none(node.get("mesh_px_x"))
+            saved_y = number_or_none(node.get("mesh_px_y"))
+            if saved_x is None and number_or_none(node.get("mesh_x")) is not None:
+                saved_x = (number_or_none(node.get("mesh_x")) or 0) / 100 * width
+            if saved_y is None and number_or_none(node.get("mesh_y")) is not None:
+                saved_y = (number_or_none(node.get("mesh_y")) or 0) / 100 * height
+
+            auto_x = column_x
+            auto_y = FLOW_PADDING_Y + (row_index * FLOW_ROW_GAP) + ((column_index % 2) * 12)
+            use_saved_layout = bool(node.get("layout_locked") or node.get("_custom"))
+            x = saved_x if saved_x is not None and use_saved_layout else auto_x
+            y = saved_y if saved_y is not None and use_saved_layout else auto_y
+            x = max(FLOW_PADDING_X / 2, min(width - FLOW_PADDING_X / 2, x))
+            y = max(FLOW_PADDING_Y / 2, min(height - FLOW_PADDING_Y / 2, y))
+
+            while overlaps(x, y):
+                y += FLOW_ROW_GAP
+                if y + (FLOW_NODE_HEIGHT / 2) + FLOW_PADDING_Y > height:
+                    height += FLOW_ROW_GAP
+                    for band in bands:
+                        band["height"] = max(160, height - 68)
+
+            node["mesh_px_x"] = round(x, 2)
+            node["mesh_px_y"] = round(y, 2)
+            node["mesh_x"] = clamp_percent((x / width) * 100)
+            node["mesh_y"] = clamp_percent((y / height) * 100)
+            occupied.append(
+                (
+                    x - FLOW_NODE_WIDTH / 2,
+                    y - FLOW_NODE_HEIGHT / 2,
+                    x + FLOW_NODE_WIDTH / 2,
+                    y + FLOW_NODE_HEIGHT / 2,
+                )
+            )
+
+    return {
+        "width": round(width, 2),
+        "height": round(height, 2),
+        "node_width": FLOW_NODE_WIDTH,
+        "node_height": FLOW_NODE_HEIGHT,
+        "padding_x": FLOW_PADDING_X,
+        "padding_y": FLOW_PADDING_Y,
+        "column_gap": FLOW_COLUMN_GAP,
+        "row_gap": FLOW_ROW_GAP,
+        "bands": bands,
+    }
 
 
 def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -350,7 +510,8 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
                 "facility_name": f"{module_name} origin producer",
                 "stage": "Raw material origin",
                 "stage_order": 0,
-                "tier": "L3",
+                "paint_tag": "Raw material",
+                "paint_color": "#67e8f9",
                 "facility_type": "farm_or_primary_source",
                 "city": supplier_city,
                 "role": "Origin producer",
@@ -369,7 +530,8 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
                 "facility_name": f"{module_name} collection and pre-cooling hub",
                 "stage": "Regional aggregation",
                 "stage_order": 1,
-                "tier": "L2",
+                "paint_tag": "Collection",
+                "paint_color": "#a78bfa",
                 "facility_type": "collection_hub",
                 "city": supplier_city,
                 "role": "Lot consolidation",
@@ -388,7 +550,8 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
                 "facility_name": f"{module_name} quality-release lab",
                 "stage": "Quality / compliance gate",
                 "stage_order": 1,
-                "tier": "L2",
+                "paint_tag": "Quality gate",
+                "paint_color": "#86efac",
                 "facility_type": "quality_lab",
                 "city": supplier_city,
                 "role": "Inspection and release",
@@ -401,7 +564,7 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
         )
         if supplier_code and supplier_code in nodes_by_code:
             nodes_by_code[supplier_code]["display_name"] = (
-                nodes_by_code[supplier_code].get("facility_name") or f"{module_name} tier-1 supplier"
+                nodes_by_code[supplier_code].get("facility_name") or f"{module_name} primary supplier"
             )
             nodes_by_code[supplier_code].setdefault("module_id", module_id)
             nodes_by_code[supplier_code]["mesh_x"] = nodes_by_code[supplier_code].get("mesh_x") or 34
@@ -417,7 +580,7 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
                     "metric": "producer ID | harvest / production date | lot size",
                     "quality_risk": "origin risk, certificate status, and basic freshness check",
                     "temperature": "pre-cooling requirement recorded",
-                    "traceability": "L3 -> L2",
+                    "traceability": "origin -> collection",
                     "module_id": module_id,
                 },
             )
@@ -432,7 +595,7 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
                     "metric": f"received {module.get('received_on') or 'editable time'} | supplier handoff",
                     "quality_risk": "lot merge rule and storage condition",
                     "temperature": f"{module.get('temperature_excursion_minutes') or 0} min excursion",
-                    "traceability": "L2 -> L1",
+                    "traceability": "collection -> supplier",
                     "module_id": module_id,
                 },
             )
@@ -447,7 +610,7 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
                     "metric": f"inspection {module.get('inspection_score') or 'editable'}",
                     "quality_risk": f"contamination risk {module.get('contamination_risk') or 'editable'}",
                     "temperature": "sample condition recorded",
-                    "traceability": "L1 -> QC",
+                    "traceability": "supplier -> QC",
                     "module_id": module_id,
                 },
             )
@@ -483,7 +646,8 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
                 "facility_name": f"{product_name} packaging compliance file",
                 "stage": "Quality / compliance gate",
                 "stage_order": 1,
-                "tier": "L2",
+                "paint_tag": "Quality gate",
+                "paint_color": "#86efac",
                 "facility_type": "packaging_compliance",
                 "city": plant_city,
                 "role": "Food-contact material and label check",
@@ -515,7 +679,8 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
                 "facility_name": f"{product_name} cold-chain sensor gateway",
                 "stage": "Logistics node",
                 "stage_order": 3,
-                "tier": "L2",
+                "paint_tag": "Logistics",
+                "paint_color": "#f472b6",
                 "facility_type": "sensor_gateway",
                 "city": plant_city,
                 "role": "Temperature and carrier telemetry",
@@ -558,16 +723,17 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
 
     nodes = list(nodes_by_code.values())
     edges = list(edges_by_id.values())
-    assign_mesh_layout(nodes)
+    payload["route"]["layout"] = assign_mesh_layout(nodes)
     valid_codes = {str(node.get("facility_code")) for node in nodes}
     edges = [edge for edge in edges if str(edge.get("from_code")) in valid_codes and str(edge.get("to_code")) in valid_codes]
+    edges, _ = dedupe_route_edges(edges)
     payload["route"]["nodes"] = nodes
     payload["route"]["edges"] = edges
 
     plant_and_downstream = {
         str(node.get("facility_code"))
         for node in nodes
-        if node.get("tier") in {"CORE", "DOWNSTREAM"} or node.get("stage") in {"Processing / packing", "Distribution center", "Retail shelf", "Logistics node"}
+        if node.get("stage") in {"Processing / packing", "Distribution center", "Retail shelf", "Logistics node"}
     }
     for module in payload.get("modules", []):
         module_id = str(module.get("module_id") or "")
@@ -580,16 +746,17 @@ def enrich_payload_mesh(sku_code: str, payload: dict[str, Any]) -> dict[str, Any
         if supplier_code:
             module_codes.add(supplier_code)
         module_codes.update(plant_and_downstream)
-        module["route_nodes"] = [node for node in nodes if str(node.get("facility_code")) in module_codes]
+        module["route_nodes"] = [dict(node) for node in nodes if str(node.get("facility_code")) in module_codes]
         module["route_edges"] = [
-            edge for edge in edges
+            dict(edge) for edge in edges
             if str(edge.get("module_id") or "") == module_id
             or (str(edge.get("from_code")) in module_codes and str(edge.get("to_code")) in module_codes)
         ]
+        module["route_layout"] = assign_mesh_layout(module["route_nodes"])
 
     overview["route_node_count"] = len(nodes)
     overview["route_edge_count"] = len(edges)
-    return payload
+    return strip_tier_fields(payload)
 
 
 def module_routes(sku_code: str, modules: pd.DataFrame, journey: dict[str, Any]) -> list[dict[str, Any]]:
@@ -683,6 +850,16 @@ def apply_detail_overrides(sku_code: str, payload: dict[str, Any]) -> dict[str, 
     payload["modules"] = merge_section("modules", payload["modules"], "module_id")
     payload["route"]["nodes"] = merge_section("route_nodes", payload["route"]["nodes"], "facility_code")
     payload["route"]["edges"] = merge_section("route_edges", payload["route"]["edges"], "edge_id")
+    payload["route"]["edges"], duplicate_edge_ids = dedupe_route_edges(payload["route"]["edges"])
+    if duplicate_edge_ids:
+        deleted_edges = sku_store.setdefault("_deleted", {}).setdefault("route_edges", [])
+        for edge_id in duplicate_edge_ids:
+            sku_store.setdefault("route_edges", {}).pop(edge_id, None)
+            if edge_id not in deleted_edges:
+                deleted_edges.append(edge_id)
+        store = read_detail_store()
+        store.setdefault(sku_code, {}).update(sku_store)
+        write_detail_store(store)
     payload["evidence"] = merge_section("evidence", payload["evidence"], "evidence_id")
 
     valid_node_codes = {str(node.get("facility_code")) for node in payload["route"]["nodes"]}
@@ -698,12 +875,14 @@ def apply_detail_overrides(sku_code: str, payload: dict[str, Any]) -> dict[str, 
             edge for edge in merge_section("route_edges", module.get("route_edges", []), "edge_id")
             if str(edge.get("from_code")) in module_codes and str(edge.get("to_code")) in module_codes
         ]
+        module["route_edges"], _ = dedupe_route_edges(module["route_edges"])
+        module["route_layout"] = assign_mesh_layout(module["route_nodes"])
 
-    assign_mesh_layout(payload["route"]["nodes"])
+    payload["route"]["layout"] = assign_mesh_layout(payload["route"]["nodes"])
     payload["overview"]["route_node_count"] = len(payload["route"]["nodes"])
     payload["overview"]["route_edge_count"] = len(payload["route"]["edges"])
 
-    return payload
+    return strip_tier_fields(payload)
 
 
 @app.get("/api/health")
@@ -785,6 +964,29 @@ async def api_update_detail(sku_code: str, payload: DetailUpdate) -> dict[str, A
         item_id = "overview"
     else:
         item_id = str(payload.item_id)
+        if payload.section == "route_edges" and {"from_code", "to_code"} & set(cleaned_updates):
+            detail = product_detail_payload(sku_code)
+            current_edge = next(
+                (
+                    edge for edge in detail.get("route", {}).get("edges", [])
+                    if str(edge.get("edge_id") or edge_identity(edge)) == item_id
+                ),
+                {},
+            )
+            next_from = str(cleaned_updates.get("from_code") or current_edge.get("from_code") or "")
+            next_to = str(cleaned_updates.get("to_code") or current_edge.get("to_code") or "")
+            if not next_from or not next_to or next_from == next_to:
+                raise HTTPException(status_code=400, detail="Route edge requires two different nodes.")
+            existing_edge = next(
+                (
+                    edge for edge in detail.get("route", {}).get("edges", [])
+                    if str(edge.get("edge_id") or edge_identity(edge)) != item_id
+                    and {str(edge.get("from_code")), str(edge.get("to_code"))} == {next_from, next_to}
+                ),
+                None,
+            )
+            if existing_edge:
+                raise HTTPException(status_code=409, detail="These two nodes are already connected.")
         sku_store.setdefault(payload.section, {}).setdefault(item_id, {}).update(cleaned_updates)
 
     write_detail_store(store)
@@ -808,6 +1010,21 @@ async def api_create_detail(sku_code: str, payload: DetailCreate) -> dict[str, A
     sku_store = store.setdefault(sku_code, {})
     cleaned_item = clean_record(payload.item)
     item_id = item_identity(payload.section, cleaned_item)
+    if payload.section == "route_edges":
+        from_code = str(cleaned_item.get("from_code") or "")
+        to_code = str(cleaned_item.get("to_code") or "")
+        if not from_code or not to_code or from_code == to_code:
+            raise HTTPException(status_code=400, detail="Route edge requires two different nodes.")
+        detail = product_detail_payload(sku_code)
+        existing_edge = next(
+            (
+                edge for edge in detail.get("route", {}).get("edges", [])
+                if {str(edge.get("from_code")), str(edge.get("to_code"))} == {from_code, to_code}
+            ),
+            None,
+        )
+        if existing_edge:
+            raise HTTPException(status_code=409, detail="These two nodes are already connected.")
 
     if payload.section == "modules":
         cleaned_item["module_id"] = item_id
