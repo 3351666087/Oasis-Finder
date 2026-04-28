@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from copy import deepcopy
 from pathlib import Path
 import json
 import math
@@ -115,6 +116,65 @@ def records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     if frame.empty:
         return []
     return [clean_record(row.to_dict()) for _, row in frame.iterrows()]
+
+
+_DEMO_PAYLOAD_CACHE: dict[str, Any] | None = None
+
+
+def demo_payload_path() -> Path:
+    candidates = [
+        Path(__file__).with_name("demo_payloads.json"),
+        Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "mesh_supply_chain" / "demo_payloads.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def read_demo_payloads() -> dict[str, Any]:
+    global _DEMO_PAYLOAD_CACHE
+    if _DEMO_PAYLOAD_CACHE is None:
+        path = demo_payload_path()
+        if not path.exists():
+            _DEMO_PAYLOAD_CACHE = {"products": [], "details": {}}
+        else:
+            _DEMO_PAYLOAD_CACHE = json.loads(path.read_text(encoding="utf-8"))
+    return _DEMO_PAYLOAD_CACHE
+
+
+def demo_product_shelf() -> list[dict[str, Any]]:
+    payload = deepcopy(read_demo_payloads().get("products", []))
+    for product in payload:
+        slots = media_slots_for(str(product.get("sku_code", "")))
+        primary = next((slot for slot in slots if slot["media_key"] == "product_packshot_url"), None)
+        product["primary_media_url"] = primary["url"] if primary else product.get("primary_media_url", "")
+    return payload
+
+
+def demo_product_detail_payload(sku_code: str) -> dict[str, Any]:
+    details = read_demo_payloads().get("details", {})
+    if sku_code not in details:
+        raise ValueError(f"Unknown product SKU: {sku_code}")
+    return apply_detail_overrides(sku_code, deepcopy(details[sku_code]))
+
+
+def safe_product_detail_payload(sku_code: str) -> dict[str, Any]:
+    try:
+        return product_detail_payload(sku_code)
+    except ValueError as exc:
+        try:
+            return demo_product_detail_payload(sku_code)
+        except ValueError:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        try:
+            return demo_product_detail_payload(sku_code)
+        except ValueError:
+            raise HTTPException(
+                status_code=503,
+                detail="Database is unavailable and no packaged demo route exists for this SKU.",
+            ) from exc
 
 
 def read_store() -> dict[str, Any]:
@@ -892,8 +952,16 @@ def api_health() -> dict[str, str]:
 
 @app.get("/api/products")
 def api_products() -> list[dict[str, Any]]:
-    shelf = load_product_shelf()
-    payload = records(shelf)
+    try:
+        shelf = load_product_shelf()
+        payload = records(shelf)
+    except Exception as exc:
+        payload = demo_product_shelf()
+        if not payload:
+            raise HTTPException(
+                status_code=503,
+                detail="Database is unavailable and no packaged demo products are available.",
+            ) from exc
     for product in payload:
         slots = media_slots_for(str(product["sku_code"]))
         primary = next((slot for slot in slots if slot["media_key"] == "product_packshot_url"), None)
@@ -903,10 +971,7 @@ def api_products() -> list[dict[str, Any]]:
 
 @app.get("/api/products/{sku_code}")
 def api_product_detail(sku_code: str) -> dict[str, Any]:
-    try:
-        return product_detail_payload(sku_code)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return safe_product_detail_payload(sku_code)
 
 
 @app.patch("/api/admin/products/{sku_code}")
@@ -965,7 +1030,7 @@ async def api_update_detail(sku_code: str, payload: DetailUpdate) -> dict[str, A
     else:
         item_id = str(payload.item_id)
         if payload.section == "route_edges" and {"from_code", "to_code"} & set(cleaned_updates):
-            detail = product_detail_payload(sku_code)
+            detail = safe_product_detail_payload(sku_code)
             current_edge = next(
                 (
                     edge for edge in detail.get("route", {}).get("edges", [])
@@ -1015,7 +1080,7 @@ async def api_create_detail(sku_code: str, payload: DetailCreate) -> dict[str, A
         to_code = str(cleaned_item.get("to_code") or "")
         if not from_code or not to_code or from_code == to_code:
             raise HTTPException(status_code=400, detail="Route edge requires two different nodes.")
-        detail = product_detail_payload(sku_code)
+        detail = safe_product_detail_payload(sku_code)
         existing_edge = next(
             (
                 edge for edge in detail.get("route", {}).get("edges", [])
@@ -1064,7 +1129,7 @@ async def api_delete_detail(sku_code: str, section: str, item_id: str) -> dict[s
         deleted.append(item_id)
 
     if section == "route_nodes":
-        detail = product_detail_payload(sku_code)
+        detail = safe_product_detail_payload(sku_code)
         connected_edges = [
             str(edge.get("edge_id"))
             for edge in detail.get("route", {}).get("edges", [])

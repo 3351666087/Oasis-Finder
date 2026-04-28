@@ -4,7 +4,11 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('web\\dist', 'web\\dist'), ('scripts\\setup_local_mysql.ps1', 'scripts')]
+datas = [
+    ('web\\dist', 'web\\dist'),
+    ('scripts\\setup_local_mysql.ps1', 'scripts'),
+    ('src\\mesh_supply_chain\\demo_payloads.json', 'mesh_supply_chain'),
+]
 binaries = []
 hiddenimports = []
 

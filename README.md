@@ -53,6 +53,7 @@ These fields follow the spirit of FDA FSMA 204 Critical Tracking Events / Key Da
 - Simulates disruption recovery with OR-Tools allocation logic.
 - Provides a browser-based customer frontend and merchant backend. Merchants can edit product facts, media, tagged graph nodes, and Visio-style route edges; customers can inspect the whole-product route or click product modules such as cake base, cream, meat, dairy, packaging, or produce components.
 - Pushes admin-side edits to the customer page through a WebSocket update channel, so the two browser views can run at the same time during the demo.
+- Includes packaged demo payloads so the Windows build can open the product shelf and supply routes even when a fresh computer has not initialized the local MySQL database yet.
 - Generates report assets, UI screenshots, speaker scripts, and presentation evidence for coursework demonstration.
 
 ## Runtime Evidence Snapshot
@@ -168,15 +169,19 @@ npm run dev -- --host 127.0.0.1 --port 5173
 The rebuilt ENT105TC deck is available at:
 
 ```text
-outputs/oasis-finder-group9-ent105tc-bilingual-v4/output.pptx
+outputs/oasis-finder-group9-ent105tc-rebuild-v2/output.pptx
 ```
 
-The deck removes the intro-only cover page and includes a clickable live demo link on the browser architecture slide:
+The current deck is rebuilt from the v2 presentation, adds a commercial cover, removes tutorial-heavy usage pages, and replaces them with merchant-facing sales language, native charts, and current customer/admin screenshots. It includes a clickable live demo link:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-It also includes a course knowledge map based on `ENT_结构化知识点整理_重构版.docx`, explicitly linking Week 2-8 concepts to the strategic question, evidence plan, qualitative coding, questionnaire signal, and mixed-method recommendation.
+It also includes a course knowledge map based on `ENT_结构化知识点整理_重构版.docx`, explicitly linking Week 2, Week 5, Week 6, Week 7, and Week 8 concepts to the strategic question, evidence plan, qualitative coding, questionnaire signal, and mixed-method recommendation.
 
-The deck includes the reframed questionnaire logic, merchant value argument, browser frontend/backend workflow, screenshots, GitHub/open-source evidence, data-responsibility notes, and an eight-minute Rui Huang / Zixiu Wang speaker plan.
+The Windows installer is rebuilt with the latest frontend and packaged fallback route data:
+
+```text
+dist/installer/OasisFinderSetup.exe
+```
