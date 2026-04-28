@@ -527,6 +527,554 @@ def get_facility_node_detail(facility_code: str, max_stage_rows: int = 24) -> di
     return {"overview": overview.iloc[0].to_dict(), "stages": stages}
 
 
+def load_product_shelf() -> pd.DataFrame:
+    """Return the consumer-facing SKU shelf shown on the home tab."""
+    frame = _read_sql(
+        """
+        SELECT
+            p.id AS product_id,
+            p.sku_code,
+            p.name AS product_name,
+            p.category,
+            p.shelf_life_days,
+            p.storage_temp_band,
+            p.standard_cost,
+            p.unit_price,
+            ROUND(p.unit_price - p.standard_cost, 2) AS margin_per_unit,
+            ROUND((p.unit_price - p.standard_cost) / NULLIF(p.unit_price, 0) * 100, 1) AS margin_rate,
+            p.target_service_level,
+            b.id AS batch_id,
+            b.batch_code AS latest_batch,
+            b.production_date,
+            b.expiry_date,
+            b.actual_qty,
+            b.quality_score,
+            b.qr_code,
+            plant.facility_code AS plant_code,
+            plant.name AS plant_name,
+            plant_loc.city AS plant_city,
+            (SELECT COUNT(*) FROM product_batches b2 WHERE b2.product_id = p.id) AS batch_count,
+            (SELECT COUNT(*)
+             FROM batch_component_usage u
+             WHERE u.product_batch_id = b.id) AS supplier_lot_count,
+            (SELECT COUNT(*)
+             FROM shipments s
+             WHERE s.batch_id = b.id) AS shipment_legs,
+            (SELECT ROUND(AVG(CASE WHEN s.on_time THEN 1 ELSE 0 END) * 100, 1)
+             FROM shipments s
+             WHERE s.batch_id = b.id) AS on_time_rate,
+            (SELECT ROUND(AVG(q.traceability_completeness) * 100, 1)
+             FROM quality_inspections q
+             WHERE q.entity_type = 'product_batch' AND q.entity_id = b.id) AS traceability_score
+        FROM products p
+        LEFT JOIN product_batches b
+          ON b.id = (
+              SELECT b0.id
+              FROM product_batches b0
+              WHERE b0.product_id = p.id
+              ORDER BY b0.production_date DESC, b0.id DESC
+              LIMIT 1
+          )
+        LEFT JOIN facilities plant ON plant.id = b.plant_facility_id
+        LEFT JOIN locations plant_loc ON plant_loc.id = plant.location_id
+        ORDER BY FIELD(p.category, 'protein', 'dairy', 'ready_meal', 'produce'), p.name
+        """,
+        parse_dates=["production_date", "expiry_date"],
+    )
+    if frame.empty:
+        return frame
+
+    for column in [
+        "quality_score",
+        "traceability_score",
+        "on_time_rate",
+        "supplier_lot_count",
+        "shipment_legs",
+        "margin_rate",
+        "batch_count",
+    ]:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0)
+
+    category_labels = {
+        "protein": "Protein / chilled meat",
+        "dairy": "Dairy / cold chain",
+        "ready_meal": "Ready meal",
+        "produce": "Fresh produce",
+    }
+    frame["category_label"] = frame["category"].map(category_labels).fillna(frame["category"])
+    frame["proof_score"] = (
+        frame["quality_score"] * 0.45
+        + frame["traceability_score"] * 0.35
+        + frame["on_time_rate"] * 0.20
+    ).round(1)
+    frame["consumer_claim"] = frame.apply(
+        lambda row: (
+            f"{int(row['supplier_lot_count'])} lots, {int(row['shipment_legs'])} route legs, "
+            f"{row['traceability_score']:.1f}% trace evidence"
+        ),
+        axis=1,
+    )
+    return frame[
+        [
+            "sku_code",
+            "product_name",
+            "category_label",
+            "unit_price",
+            "margin_rate",
+            "shelf_life_days",
+            "storage_temp_band",
+            "latest_batch",
+            "quality_score",
+            "traceability_score",
+            "on_time_rate",
+            "proof_score",
+            "consumer_claim",
+            "supplier_lot_count",
+            "shipment_legs",
+            "plant_name",
+            "plant_city",
+            "batch_count",
+            "product_id",
+            "batch_id",
+            "production_date",
+            "expiry_date",
+            "qr_code",
+        ]
+    ]
+
+
+def get_product_journey(sku_code: str) -> dict:
+    """Build a product-first route, evidence table, and overview for a SKU."""
+
+    def format_date(value) -> str:
+        if pd.isna(value):
+            return ""
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d")
+        return str(value)
+
+    def format_datetime(value) -> str:
+        if pd.isna(value):
+            return ""
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d %H:%M")
+        return str(value)
+
+    header = _read_sql(
+        """
+        SELECT
+            p.id AS product_id,
+            p.sku_code,
+            p.name AS product_name,
+            p.category,
+            p.shelf_life_days,
+            p.storage_temp_band,
+            p.standard_cost,
+            p.unit_price,
+            ROUND(p.unit_price - p.standard_cost, 2) AS margin_per_unit,
+            ROUND((p.unit_price - p.standard_cost) / NULLIF(p.unit_price, 0) * 100, 1) AS margin_rate,
+            p.target_service_level,
+            b.id AS batch_id,
+            b.batch_code,
+            b.production_date,
+            b.expiry_date,
+            b.actual_qty,
+            b.yield_rate,
+            b.quality_score,
+            b.status,
+            b.qr_code,
+            b.recall_flag,
+            plant.id AS plant_id,
+            plant.facility_code AS plant_code,
+            plant.name AS plant_name,
+            plant.tier_level AS plant_tier,
+            plant.facility_type AS plant_type,
+            plant_loc.province AS plant_province,
+            plant_loc.city AS plant_city,
+            plant_loc.district AS plant_district,
+            plant_org.name AS plant_operator
+        FROM products p
+        LEFT JOIN product_batches b
+          ON b.id = (
+              SELECT b0.id
+              FROM product_batches b0
+              WHERE b0.product_id = p.id
+              ORDER BY b0.production_date DESC, b0.id DESC
+              LIMIT 1
+          )
+        LEFT JOIN facilities plant ON plant.id = b.plant_facility_id
+        LEFT JOIN locations plant_loc ON plant_loc.id = plant.location_id
+        LEFT JOIN organizations plant_org ON plant_org.id = plant.organization_id
+        WHERE p.sku_code = :sku_code
+        LIMIT 1
+        """,
+        params={"sku_code": sku_code},
+        parse_dates=["production_date", "expiry_date"],
+    )
+    if header.empty:
+        raise ValueError(f"Unknown product SKU: {sku_code}")
+
+    overview = header.iloc[0].to_dict()
+    if pd.isna(overview.get("batch_id")):
+        return {
+            "overview": overview,
+            "route_nodes": pd.DataFrame(),
+            "route_edges": pd.DataFrame(),
+            "evidence": pd.DataFrame(),
+        }
+
+    batch_id = int(overview["batch_id"])
+    product_id = int(overview["product_id"])
+    plant_code = str(overview["plant_code"])
+    plant_city = str(overview["plant_city"])
+
+    components = _read_sql(
+        """
+        SELECT
+            supplier.id AS supplier_id,
+            supplier.facility_code AS supplier_code,
+            supplier.name AS supplier_name,
+            supplier.tier_level AS supplier_tier,
+            supplier.facility_type AS supplier_type,
+            supplier_loc.province AS supplier_province,
+            supplier_loc.city AS supplier_city,
+            supplier_org.name AS supplier_operator,
+            m.material_code,
+            m.name AS material_name,
+            m.category AS material_category,
+            u.quantity_kg,
+            u.upstream_depth_label,
+            lot.lot_code,
+            lot.harvested_on,
+            lot.produced_on,
+            lot.received_on,
+            lot.inspection_score,
+            lot.contamination_risk,
+            lot.traceability_completeness,
+            lot.temperature_excursion_minutes
+        FROM batch_component_usage u
+        JOIN supplier_lots lot ON lot.id = u.supplier_lot_id
+        JOIN materials m ON m.id = u.material_id
+        JOIN facilities supplier ON supplier.id = lot.supplier_facility_id
+        JOIN locations supplier_loc ON supplier_loc.id = supplier.location_id
+        JOIN organizations supplier_org ON supplier_org.id = supplier.organization_id
+        WHERE u.product_batch_id = :batch_id
+        ORDER BY u.upstream_depth_label, m.category, m.name
+        """,
+        params={"batch_id": batch_id},
+        parse_dates=["harvested_on", "produced_on", "received_on"],
+    )
+
+    shipments = _read_sql(
+        """
+        SELECT
+            s.shipment_code,
+            src.id AS source_id,
+            src.facility_code AS source_code,
+            src.name AS source_name,
+            src.tier_level AS source_tier,
+            src.facility_type AS source_type,
+            src_loc.province AS source_province,
+            src_loc.city AS source_city,
+            dst.id AS destination_id,
+            dst.facility_code AS destination_code,
+            dst.name AS destination_name,
+            dst.tier_level AS destination_tier,
+            dst.facility_type AS destination_type,
+            dst_loc.province AS destination_province,
+            dst_loc.city AS destination_city,
+            s.dispatched_at,
+            s.arrived_at,
+            s.planned_hours,
+            s.actual_hours,
+            s.distance_km,
+            s.temp_min_c,
+            s.temp_max_c,
+            s.cold_chain_breach_minutes,
+            s.on_time,
+            s.transport_cost,
+            s.carrier_name,
+            s.route_risk_score
+        FROM shipments s
+        JOIN facilities src ON src.id = s.source_facility_id
+        JOIN locations src_loc ON src_loc.id = src.location_id
+        JOIN facilities dst ON dst.id = s.destination_facility_id
+        JOIN locations dst_loc ON dst_loc.id = dst.location_id
+        WHERE s.batch_id = :batch_id
+        ORDER BY s.dispatched_at, s.arrived_at
+        """,
+        params={"batch_id": batch_id},
+        parse_dates=["dispatched_at", "arrived_at"],
+    )
+
+    inspections = _read_sql(
+        """
+        SELECT
+            q.inspected_at,
+            q.inspection_stage,
+            q.pathogen_ppm,
+            q.residue_ppm,
+            q.package_integrity_score,
+            q.traceability_completeness,
+            q.result,
+            q.notes,
+            f.name AS facility_name,
+            l.city AS facility_city
+        FROM quality_inspections q
+        JOIN facilities f ON f.id = q.facility_id
+        JOIN locations l ON l.id = f.location_id
+        WHERE q.entity_type = 'product_batch' AND q.entity_id = :batch_id
+        ORDER BY q.inspected_at DESC
+        """,
+        params={"batch_id": batch_id},
+        parse_dates=["inspected_at"],
+    )
+
+    inventory = _read_sql(
+        """
+        SELECT
+            i.snapshot_date,
+            f.facility_code,
+            f.name AS facility_name,
+            f.facility_type,
+            l.city,
+            i.on_hand_qty,
+            i.reserved_qty,
+            i.safety_stock_qty,
+            i.days_of_cover,
+            i.freshness_index
+        FROM inventory_snapshots i
+        JOIN facilities f ON f.id = i.facility_id
+        JOIN locations l ON l.id = f.location_id
+        WHERE i.item_type = 'product'
+          AND i.item_id = :product_id
+          AND i.facility_id IN (
+              SELECT destination_facility_id
+              FROM shipments
+              WHERE batch_id = :batch_id
+          )
+        ORDER BY i.snapshot_date DESC, f.facility_type
+        LIMIT 6
+        """,
+        params={"product_id": product_id, "batch_id": batch_id},
+        parse_dates=["snapshot_date"],
+    )
+
+    route_node_map: dict[str, dict] = {}
+    route_edge_rows: list[dict] = []
+    evidence_rows: list[dict] = []
+
+    def upsert_node(
+        code: str,
+        name: str,
+        stage_order: int,
+        stage: str,
+        tier: str,
+        facility_type: str,
+        city: str,
+        role: str,
+        visible_value: str,
+    ) -> None:
+        if code in route_node_map:
+            if visible_value and visible_value not in route_node_map[code]["visible_value"]:
+                route_node_map[code]["visible_value"] += f"; {visible_value}"
+            return
+        route_node_map[code] = {
+            "stage_order": stage_order,
+            "stage": stage,
+            "facility_code": code,
+            "facility_name": name,
+            "tier": tier,
+            "facility_type": facility_type,
+            "city": city,
+            "role": role,
+            "visible_value": visible_value,
+        }
+
+    def downstream_stage(facility_type: str, tier: str) -> tuple[int, str, str]:
+        if facility_type == "distribution_center":
+            return 3, "Distribution center", "Cold-chain distribution"
+        if facility_type == "retail_hub":
+            return 4, "Retail shelf", "Consumer-facing channel"
+        if tier == "CORE":
+            return 2, "Processing / packing", "Factory node"
+        return 3, "Logistics node", "Route transfer"
+
+    upsert_node(
+        plant_code,
+        str(overview["plant_name"]),
+        2,
+        "Processing / packing",
+        str(overview["plant_tier"]),
+        str(overview["plant_type"]),
+        plant_city,
+        "Batch owner",
+        f"batch {overview['batch_code']} | quality {float(overview['quality_score']):.1f}",
+    )
+
+    for _, row in components.iterrows():
+        trace_score = float(row["traceability_completeness"]) * 100
+        upsert_node(
+            str(row["supplier_code"]),
+            str(row["supplier_name"]),
+            1,
+            "Ingredient source",
+            str(row["supplier_tier"]),
+            str(row["supplier_type"]),
+            str(row["supplier_city"]),
+            "Supplier lot owner",
+            f"{row['material_name']} | lot {row['lot_code']} | inspection {float(row['inspection_score']):.1f}",
+        )
+        route_edge_rows.append(
+            {
+                "from_code": row["supplier_code"],
+                "to_code": plant_code,
+                "flow": row["material_name"],
+                "evidence": row["lot_code"],
+                "stage": "ingredient_to_plant",
+                "metric": f"{float(row['quantity_kg']):.1f} kg | received {format_date(row['received_on'])}",
+                "quality_risk": f"inspection {float(row['inspection_score']):.1f} | contamination {float(row['contamination_risk']):.2f}",
+                "temperature": f"{int(row['temperature_excursion_minutes'])} min excursion",
+                "traceability": f"{trace_score:.1f}%",
+            }
+        )
+        evidence_rows.append(
+            {
+                "stage": "Ingredient lot",
+                "time": row["received_on"],
+                "location": f"{row['supplier_city']} -> {plant_city}",
+                "item": row["material_name"],
+                "evidence": row["lot_code"],
+                "metric": f"{float(row['quantity_kg']):.1f} kg | harvested {format_date(row['harvested_on'])}",
+                "quality_risk": f"inspection {float(row['inspection_score']):.1f} | risk {float(row['contamination_risk']):.2f}",
+                "temp": f"{int(row['temperature_excursion_minutes'])} min excursion",
+                "trace": f"{trace_score:.1f}%",
+                "consumer_message": "Material source, lot date, and inbound quality evidence are inspectable.",
+            }
+        )
+
+    evidence_rows.append(
+        {
+            "stage": "Product identity",
+            "time": overview["production_date"],
+            "location": f"{overview['plant_name']} | {plant_city}",
+            "item": f"{overview['sku_code']} | {overview['product_name']}",
+            "evidence": f"{overview['batch_code']} | {overview['qr_code']}",
+            "metric": f"{float(overview['actual_qty']):.1f} units | expiry {format_date(overview['expiry_date'])}",
+            "quality_risk": f"quality {float(overview['quality_score']):.1f} | yield {float(overview['yield_rate']) * 100:.1f}%",
+            "temp": str(overview["storage_temp_band"]),
+            "trace": "QR batch proof",
+            "consumer_message": "The product card links the SKU to a released batch and QR evidence.",
+        }
+    )
+
+    for _, row in shipments.iterrows():
+        for prefix in ["source", "destination"]:
+            order, stage, role = downstream_stage(str(row[f"{prefix}_type"]), str(row[f"{prefix}_tier"]))
+            upsert_node(
+                str(row[f"{prefix}_code"]),
+                str(row[f"{prefix}_name"]),
+                order,
+                stage,
+                str(row[f"{prefix}_tier"]),
+                str(row[f"{prefix}_type"]),
+                str(row[f"{prefix}_city"]),
+                role,
+                f"{row['shipment_code']} | {format_datetime(row['arrived_at'])}",
+            )
+        route_edge_rows.append(
+            {
+                "from_code": row["source_code"],
+                "to_code": row["destination_code"],
+                "flow": overview["product_name"],
+                "evidence": row["shipment_code"],
+                "stage": "product_shipment",
+                "metric": f"{float(row['distance_km']):.0f} km | {float(row['actual_hours']):.1f}/{float(row['planned_hours']):.1f} h",
+                "quality_risk": f"on time {bool(row['on_time'])} | route risk {float(row['route_risk_score']):.1f}",
+                "temperature": f"{float(row['temp_min_c']):.1f}C to {float(row['temp_max_c']):.1f}C | breach {int(row['cold_chain_breach_minutes'])} min",
+                "traceability": str(row["carrier_name"]),
+            }
+        )
+        evidence_rows.append(
+            {
+                "stage": "Cold-chain route",
+                "time": row["dispatched_at"],
+                "location": f"{row['source_city']} -> {row['destination_city']}",
+                "item": overview["product_name"],
+                "evidence": row["shipment_code"],
+                "metric": f"{float(row['distance_km']):.0f} km | arrived {format_datetime(row['arrived_at'])}",
+                "quality_risk": f"on time {bool(row['on_time'])} | route risk {float(row['route_risk_score']):.1f}",
+                "temp": f"{float(row['temp_min_c']):.1f}C to {float(row['temp_max_c']):.1f}C | breach {int(row['cold_chain_breach_minutes'])} min",
+                "trace": str(row["carrier_name"]),
+                "consumer_message": "The route records dispatch time, arrival time, carrier, and cold-chain status.",
+            }
+        )
+
+    for _, row in inspections.iterrows():
+        evidence_rows.append(
+            {
+                "stage": "Finished-goods QC",
+                "time": row["inspected_at"],
+                "location": f"{row['facility_name']} | {row['facility_city']}",
+                "item": overview["product_name"],
+                "evidence": row["result"],
+                "metric": f"pathogen {float(row['pathogen_ppm']):.3f} ppm | residue {float(row['residue_ppm']):.3f} ppm",
+                "quality_risk": f"package {float(row['package_integrity_score']):.1f}",
+                "temp": "",
+                "trace": f"{float(row['traceability_completeness']) * 100:.1f}%",
+                "consumer_message": "Finished-goods inspection turns the claim into a measurable quality checkpoint.",
+            }
+        )
+
+    for _, row in inventory.iterrows():
+        evidence_rows.append(
+            {
+                "stage": "Shelf availability",
+                "time": row["snapshot_date"],
+                "location": f"{row['facility_name']} | {row['city']}",
+                "item": overview["product_name"],
+                "evidence": row["facility_code"],
+                "metric": f"on hand {float(row['on_hand_qty']):.1f} | reserved {float(row['reserved_qty']):.1f}",
+                "quality_risk": f"cover {float(row['days_of_cover']):.1f} days | freshness {float(row['freshness_index']):.2f}",
+                "temp": str(overview["storage_temp_band"]),
+                "trace": f"safety stock {float(row['safety_stock_qty']):.1f}",
+                "consumer_message": "Retail availability and freshness make the transparency claim actionable at purchase time.",
+            }
+        )
+
+    route_nodes = pd.DataFrame(route_node_map.values())
+    if not route_nodes.empty:
+        route_nodes = route_nodes.sort_values(["stage_order", "facility_name"]).reset_index(drop=True)
+
+    route_edges = pd.DataFrame(route_edge_rows)
+    evidence = pd.DataFrame(evidence_rows)
+    if not evidence.empty:
+        evidence["_sort_time"] = pd.to_datetime(evidence["time"], errors="coerce")
+        evidence = (
+            evidence.sort_values(["_sort_time", "stage"], ascending=[False, True], na_position="last")
+            .drop(columns=["_sort_time"])
+            .reset_index(drop=True)
+        )
+
+    overview["route_node_count"] = int(len(route_nodes))
+    overview["route_edge_count"] = int(len(route_edges))
+    overview["evidence_row_count"] = int(len(evidence))
+    overview["supplier_lot_count"] = int(len(components))
+    overview["shipment_leg_count"] = int(len(shipments))
+    overview["traceability_score"] = float(
+        pd.to_numeric(inspections["traceability_completeness"], errors="coerce").mean() * 100
+        if not inspections.empty
+        else pd.to_numeric(components["traceability_completeness"], errors="coerce").mean() * 100
+    )
+
+    return {
+        "overview": overview,
+        "route_nodes": route_nodes,
+        "route_edges": route_edges,
+        "evidence": evidence,
+    }
+
+
 def get_batch_codes(limit: int = 200) -> list[str]:
     frame = _read_sql(
         f"""

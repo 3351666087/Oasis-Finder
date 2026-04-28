@@ -1,6 +1,6 @@
 # Oasis Finder
 
-Oasis Finder is Group 9's fresh-food supply-chain transparency prototype. The current presentation reframes the project as a merchant-facing method: when a seller displays a product's supply-chain structure, stage data, and evidence fields, users should be more willing to buy because the product feels less risky and more verifiable.
+Oasis Finder is Group 9's fresh-food supply-chain transparency prototype. The current product reframes the project as a merchant-facing method: when a seller displays a product's supply-chain route, stage data, and evidence fields on a product page, users should be more willing to buy because the product feels less risky and more verifiable.
 
 The repository contains a local MySQL digital twin, a PySide6 control tower, risk scoring, demand forecasting, traceability queries, disruption recovery simulation, evidence screenshots, and the final ENT105TC presentation assets.
 
@@ -8,10 +8,23 @@ The repository contains a local MySQL digital twin, a PySide6 control tower, ris
 
 Oasis Finder is not only a dashboard. It is a way for merchants to advertise with inspectable evidence:
 
-- Show the supplier chain behind a product page or QR scan.
-- Let users click each supply-chain node and inspect stage-level variables.
+- Start from a retail-style product shelf with product name, category, price, storage band, latest batch, and proof score.
+- Let users click a product and inspect that exact SKU's supplier lots, production batch, cold-chain route, retail shelf state, and quality checkpoints.
+- Preserve the full operational dashboard and mesh topology for managers, but make the home page consumer-friendly for marketing use.
 - Present concrete values such as time, place, batch, quality, temperature, shipment, and risk.
 - Keep the code and interface open for review while making merchant data responsibility explicit.
+
+## CP Group Pilot Fit
+
+Oasis Finder is especially suitable for a CP Group-style partner because CP Group publicly describes a broad business portfolio across Agro-industry and Food, Retail and Distribution, E-Commerce and Digital, and other business lines. Its food business is described as a fully integrated value chain covering feed, livestock farming, food production, retail stores, and restaurants, with technology used for full traceability across production. CPF also describes its business as Feed, Farm, and Food, and CP Axtra connects Makro and Lotus's retail/wholesale channels with fresh and frozen meat, vegetables, and fruits.
+
+This makes CP Group a strong pilot case: a single product card can connect upstream farm/feed inputs, processing plants, cold-chain shipments, and retail shelves. The product is not CP-only, though. Any merchant can use the same schema if it can provide SKU, batch, supplier lot, facility, shipment, inspection, QR, IoT, and audit evidence fields.
+
+Reference links:
+
+- CP Group business lines and traceability: https://www.cpgroupglobal.com/en/about-cp-group/our-business
+- CPF business overview: https://www.cpfworldwide.com/en/about
+- CP Axtra retail/wholesale fresh-food context: https://www.cpaxtra.com/en/newsroom/news/548/makro-expands-own-brand-portfolio-products-to-elevate-customer-experience-and-cement-position-as-a-leading-food-destination
 
 ## Data Responsibility
 
@@ -32,11 +45,12 @@ These fields follow the spirit of FDA FSMA 204 Critical Tracking Events / Key Da
 ## Current Capabilities
 
 - Models a multi-tier fresh-food supply network across L1, L2, L3, core plants, downstream nodes, and service providers.
+- Adds a product-first home tab where merchants can show product names and categories before users inspect a SKU-level supply route.
 - Traces product batches back to supplier lots, inspections, material usage, and shipment legs.
 - Adds a clickable Network Mesh detail panel that exposes stage-level node data after selecting a facility.
 - Trains XGBoost-based risk and demand forecasting models.
 - Simulates disruption recovery with OR-Tools allocation logic.
-- Provides a PySide6 desktop control tower with Dashboard, Network Mesh, Traceability, Forecasting, and Scenario Lab tabs.
+- Provides a PySide6 desktop application with Product Shelf, Dashboard, Network Mesh, Traceability, Forecasting, and Scenario Lab tabs.
 - Generates report assets, UI screenshots, speaker scripts, and presentation evidence for coursework demonstration.
 
 ## Runtime Evidence Snapshot
@@ -77,7 +91,7 @@ The latest validated local runtime contains:
 |   `-- ui.py                      # PySide6 interface
 |-- artifacts/
 |   |-- report_assets/             # Exported report figures
-|   `-- ui_captures_native/        # Demonstration screenshots
+|   `-- ui_captures_native/        # Demonstration screenshots, including product_shelf_cp_route.png
 `-- outputs/
     `-- oasis-finder-group9-ent105tc-rebuild-v2/
         |-- output.pptx
