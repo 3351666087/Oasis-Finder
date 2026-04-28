@@ -9,6 +9,10 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Frontend
+node_modules/
+web/dist/
+
 # Build and scratch outputs
 tmp/
 outputs/*/preview/

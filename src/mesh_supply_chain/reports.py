@@ -122,7 +122,7 @@ def build_presubmission_report(output_path: Path) -> Path:
 
     document.add_heading("Section 2: Project Scope", level=1)
     document.add_paragraph(
-        "This submission delivers a Python repository backed by MySQL and a PySide6 desktop front end. "
+        "This submission delivers a Python repository backed by MySQL, a FastAPI merchant backend, and a React browser front end. "
         f"The current prototype models {int(stats['organizations'])} organisations, {int(stats['facilities'])} facilities, {int(stats['supply_edges'])} active supply links, "
         f"{int(stats['supplier_lots'])} upstream lots, {int(stats['product_batches'])} finished-goods batches, {int(stats['shipments'])} shipments, and {int(stats['demand_rows'])} demand observations."
     )
@@ -141,19 +141,19 @@ def build_presubmission_report(output_path: Path) -> Path:
 
     document.add_heading("Section 4: The Framework / Process", level=1)
     document.add_paragraph(
-        "The team process used six engineering phases: requirement extraction from the original brief, supply-network domain modelling, MySQL schema design, synthetic dataset generation, analytics model training, and PySide6 interface validation. "
+        "The team process used six engineering phases: requirement extraction from the original brief, supply-network domain modelling, MySQL schema design, synthetic dataset generation, analytics model training, and browser interface validation. "
         "Instead of building a static mock-up, the system was developed as a working digital twin with seeded operational data."
     )
 
     document.add_heading("Section 5: The Selected Approach", level=1)
     document.add_paragraph(
-        "A Python code repository was selected because it allows direct integration between MySQL data engineering, machine learning analytics, simulation logic, and a deployable desktop interface. "
+        "A Python code repository was selected because it allows direct integration between MySQL data engineering, machine learning analytics, simulation logic, and a deployable browser interface. "
         "Compared with slideware or a purely conceptual design, this approach demonstrates executable engineering value and leaves a reusable platform for later expansion."
     )
 
     document.add_heading("Section 6: Tools Justification", level=1)
     document.add_paragraph(
-        "MySQL was selected for relational traceability and supplier-network storage, PySide6 for a rich desktop operations interface, and open-source Python analytics libraries for forecasting and risk modelling. "
+        "MySQL was selected for relational traceability and supplier-network storage, FastAPI and React for a rich browser workflow, and open-source Python analytics libraries for forecasting and risk modelling. "
         "This stack balances realism, maintainability, and speed of implementation while supporting future integration into enterprise systems."
     )
 
@@ -174,4 +174,3 @@ def build_presubmission_report(output_path: Path) -> Path:
 
     document.save(output_path)
     return output_path
-

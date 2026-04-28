@@ -1104,6 +1104,101 @@ def get_product_journey(sku_code: str) -> dict:
     }
 
 
+def get_product_modules(sku_code: str) -> pd.DataFrame:
+    """Return component-level modules for product dissection in the web UI."""
+    modules = _read_sql(
+        """
+        SELECT
+            p.sku_code,
+            p.name AS product_name,
+            b.id AS batch_id,
+            b.batch_code,
+            m.material_code AS module_id,
+            m.name AS module_name,
+            m.category AS module_category,
+            m.cold_chain_required,
+            bom.quantity_per_unit,
+            bom.priority_rank,
+            u.quantity_kg AS batch_quantity_kg,
+            u.upstream_depth_label,
+            lot.lot_code,
+            lot.harvested_on,
+            lot.produced_on,
+            lot.received_on,
+            lot.inspection_score,
+            lot.contamination_risk,
+            lot.traceability_completeness,
+            lot.temperature_excursion_minutes,
+            supplier.facility_code AS supplier_code,
+            supplier.name AS supplier_name,
+            supplier.tier_level AS supplier_tier,
+            supplier.facility_type AS supplier_type,
+            loc.city AS supplier_city,
+            loc.province AS supplier_province
+        FROM products p
+        JOIN bill_of_materials bom ON bom.product_id = p.id
+        JOIN materials m ON m.id = bom.material_id
+        LEFT JOIN product_batches b
+          ON b.id = (
+              SELECT b0.id
+              FROM product_batches b0
+              WHERE b0.product_id = p.id
+              ORDER BY b0.production_date DESC, b0.id DESC
+              LIMIT 1
+          )
+        LEFT JOIN batch_component_usage u ON u.product_batch_id = b.id AND u.material_id = m.id
+        LEFT JOIN supplier_lots lot ON lot.id = u.supplier_lot_id
+        LEFT JOIN facilities supplier ON supplier.id = lot.supplier_facility_id
+        LEFT JOIN locations loc ON loc.id = supplier.location_id
+        WHERE p.sku_code = :sku_code
+        ORDER BY bom.priority_rank, m.name
+        """,
+        params={"sku_code": sku_code},
+        parse_dates=["harvested_on", "produced_on", "received_on"],
+    )
+    if modules.empty:
+        return modules
+
+    trace = pd.to_numeric(modules["traceability_completeness"], errors="coerce").fillna(0) * 100
+    inspection = pd.to_numeric(modules["inspection_score"], errors="coerce").fillna(0)
+    contamination = pd.to_numeric(modules["contamination_risk"], errors="coerce").fillna(0)
+    modules["module_score"] = (trace * 0.42 + inspection * 0.48 + (100 - contamination * 100).clip(lower=0) * 0.10).round(1)
+    def module_sentence(row) -> str:
+        city = "a mapped supplier" if pd.isna(row["supplier_city"]) else row["supplier_city"]
+        lot = "pending" if pd.isna(row["lot_code"]) else row["lot_code"]
+        inspection = 0.0 if pd.isna(row["inspection_score"]) else float(row["inspection_score"])
+        traceability = 0.0 if pd.isna(row["traceability_completeness"]) else float(row["traceability_completeness"]) * 100
+        return (
+            f"{row['module_name']} comes from {city}; lot {lot} has inspection {inspection:.1f} "
+            f"and traceability {traceability:.1f}%."
+        )
+
+    modules["plain_language"] = modules.apply(module_sentence, axis=1)
+    return modules
+
+
+def update_product_fields(sku_code: str, updates: dict) -> dict:
+    allowed = {
+        "product_name": "name",
+        "category": "category",
+        "unit_price": "unit_price",
+        "shelf_life_days": "shelf_life_days",
+        "storage_temp_band": "storage_temp_band",
+    }
+    values = {allowed[key]: value for key, value in updates.items() if key in allowed and value is not None}
+    if not values:
+        return {"updated": False, "sku_code": sku_code, "fields": []}
+
+    assignments = ", ".join(f"{column} = :{column}" for column in values)
+    params = {"sku_code": sku_code, **values}
+    with _engine().begin() as connection:
+        result = connection.execute(
+            text(f"UPDATE products SET {assignments} WHERE sku_code = :sku_code"),
+            params,
+        )
+    return {"updated": bool(result.rowcount), "sku_code": sku_code, "fields": list(values.keys())}
+
+
 def get_batch_codes(limit: int = 200) -> list[str]:
     frame = _read_sql(
         f"""

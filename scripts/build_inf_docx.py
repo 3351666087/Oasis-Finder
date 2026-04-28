@@ -705,7 +705,7 @@ def build_architecture_diagram(context: RuntimeContext) -> None:
         "INTERFACE",
         "Decision Surface",
         "",
-        ["PySide6 control tower", "DOCX evidence export", f"{context.active_alerts} active alerts surfaced"],
+        ["Browser control tower", "DOCX evidence export", f"{context.active_alerts} active alerts surfaced"],
     )
 
     draw_connector((x_positions[0] + main_w, 4.84), (x_positions[1], 4.84), "bootstrap", accents[0])
@@ -853,7 +853,7 @@ def add_module_table(document: Document, context: RuntimeContext) -> None:
         ),
         (
             "ui.py + reports.py",
-            "Expose five PySide6 tabs and export chart-backed DOCX evidence for submission.",
+            "Expose a browser frontend, merchant backend, and chart-backed DOCX evidence for submission.",
             "The final deliverable is both usable in a demo setting and able to generate formal technical artefacts.",
         ),
     ]
@@ -926,7 +926,7 @@ def build_document(context: RuntimeContext) -> Document:
     add_body_paragraph(
         document,
         "The semester deliverable is a working Python repository that implements a fresh-food supply chain intelligence platform rather than a static concept mock-up. "
-        "The solution combines a local MySQL runtime, SQLAlchemy data models, machine-learning analytics, linear-programming-based recovery planning, and a PySide6 desktop interface. "
+        "The solution combines a local MySQL runtime, SQLAlchemy data models, machine-learning analytics, linear-programming-based recovery planning, and a browser-based interface. "
         "Its engineering goal is not only to show where a product came from, but to model how upstream suppliers, cold-chain logistics, inventory, demand, and disruption risk interact inside one traceable system.",
     )
     add_body_paragraph(
@@ -997,7 +997,7 @@ def build_document(context: RuntimeContext) -> Document:
     )
     add_body_paragraph(
         document,
-        "Taken together, the repository delivers a coherent technical solution: bootstrapping scripts establish the runtime, the database stores tier-aware operational history, analytics transform raw data into predictions, the desktop UI makes the information explorable, and reports.py generates submission-ready DOCX evidence. "
+        "Taken together, the repository delivers a coherent technical solution: bootstrapping scripts establish the runtime, the database stores tier-aware operational history, analytics transform raw data into predictions, the browser UI makes the information explorable, and reports.py generates submission-ready DOCX evidence. "
         "The semester deliverable is therefore a functioning engineering prototype with reproducible commands, measurable outputs, and a clear path to future extension.",
     )
 
@@ -1006,7 +1006,7 @@ def build_document(context: RuntimeContext) -> Document:
         document,
         [
             "Synthetic data boundary. The network structure is realistic, but the underlying records are still generated rather than sourced directly from CP Group or a live enterprise environment. The current results therefore validate architecture, workflow, and analytical feasibility more than they validate production-level decision accuracy.",
-            "Local desktop deployment. The deliverable currently runs as a local MySQL plus PySide6 application on a single machine. It is strong for technical demonstration and controlled testing, but it is not yet a cloud-hosted, multi-user platform with role-based access control or browser access.",
+            "Local browser deployment. The deliverable currently runs as a local MySQL plus FastAPI/React application on a single machine. It is strong for technical demonstration and controlled testing, but it is not yet a cloud-hosted, multi-user platform with role-based access control.",
             "Traceability input channel. Once a batch exists in the database, the system can trace it very effectively; however, the project does not yet include a production QR/mobile scanning pipeline, IoT sensor ingestion, or automatic ERP/WMS connectors for real-time event capture.",
             "Model scope and assumptions. Both XGBoost models are trained on synthetic operating patterns, and the optimisation engine uses simplified cost-capacity assumptions. Under black-swan disruptions, policy shocks, or atypical supplier behaviour, human review would still be necessary before acting on the recommendations.",
             "Operational hardening. Automated backup, audit logging, cyber-security controls, and large-scale performance benchmarking remain prototype-level. These are essential before the system could be used as a mission-critical enterprise platform.",
@@ -1049,7 +1049,7 @@ def build_document(context: RuntimeContext) -> Document:
             "Review technical consistency across the codebase, documentation, and demonstration narrative so the final submission behaves as one system instead of a set of disconnected drafts.",
         ],
         [
-            "Finalised the current project direction around a MySQL plus PySide6 plus analytics digital-twin platform and aligned the team away from earlier inconsistent web-only descriptions.",
+            "Finalised the current project direction around a MySQL plus FastAPI/React plus analytics digital-twin platform and aligned the team away from earlier inconsistent static mock-up descriptions.",
             "Coordinated interface consistency across schema design, seeded data, analytics outputs, and UI behaviour so that traceability, forecasting, and scenario simulation use the same tier logic and naming conventions.",
             "Led end-to-end verification of the local MySQL runtime, repository workflow, generated artefacts, and final report quality, then consolidated conflicting member write-ups into one coherent submission standard.",
             "Directed the final technical documentation so that the report reflects the real repository structure, actual metrics, and reproducible project workflow.",
@@ -1165,7 +1165,7 @@ def build_document(context: RuntimeContext) -> Document:
             "Provide design feedback that helps technical outputs become understandable during live demonstration or review.",
         ],
         [
-            "Supported the structure and presentation logic of the desktop interface across Dashboard, Network Mesh, Traceability, Forecasting, and Scenario Lab.",
+            "Supported the structure and presentation logic of the browser interface across customer view, merchant studio, traceability, forecasting, and scenario workflows.",
             "Helped refine how users move through the application so the project can be presented as a coherent control-tower workflow instead of a disconnected feature list.",
             "Contributed review feedback on layout clarity, visual consistency, and demonstration readability for the final submission materials.",
         ],

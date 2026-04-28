@@ -2,7 +2,7 @@
 
 Oasis Finder is Group 9's fresh-food supply-chain transparency prototype. The current product reframes the project as a merchant-facing method: when a seller displays a product's supply-chain route, stage data, and evidence fields on a product page, users should be more willing to buy because the product feels less risky and more verifiable.
 
-The repository contains a local MySQL digital twin, a PySide6 control tower, risk scoring, demand forecasting, traceability queries, disruption recovery simulation, evidence screenshots, and the final ENT105TC presentation assets.
+The repository contains a local MySQL digital twin, a FastAPI merchant backend, a React/Vite customer frontend, risk scoring, demand forecasting, traceability queries, disruption recovery simulation, evidence screenshots, and the final ENT105TC presentation assets.
 
 ## Product Premise
 
@@ -51,7 +51,8 @@ These fields follow the spirit of FDA FSMA 204 Critical Tracking Events / Key Da
 - Adds a clickable Network Mesh detail panel that exposes stage-level node data after selecting a facility.
 - Trains XGBoost-based risk and demand forecasting models.
 - Simulates disruption recovery with OR-Tools allocation logic.
-- Provides a PySide6 desktop application with Product Shelf, Dashboard, Network Mesh, Traceability, Forecasting, and Scenario Lab tabs.
+- Provides a browser-based customer frontend and merchant backend. Merchants can edit product facts and media; customers can inspect the whole-product route or click product modules such as cake base, cream, meat, dairy, packaging, or produce components.
+- Pushes admin-side edits to the customer page through a WebSocket update channel, so the two browser views can run at the same time during the demo.
 - Generates report assets, UI screenshots, speaker scripts, and presentation evidence for coursework demonstration.
 
 ## Runtime Evidence Snapshot
@@ -76,10 +77,11 @@ The latest validated local runtime contains:
 
 ```text
 .
-|-- app.py                         # Desktop app entry point
+|-- app.py                         # Browser app launcher
 |-- manage.py                      # Bootstrap, training, reporting, and health commands
 |-- environment.yml                # Conda environment definition
 |-- requirements.txt               # Pip dependency list
+|-- web/                           # React/Vite customer frontend and merchant studio
 |-- scripts/
 |   |-- setup_local_mysql.ps1      # Local MySQL runtime setup
 |   `-- build_inf_docx.py          # Technical report generator
@@ -89,7 +91,8 @@ The latest validated local runtime contains:
 |   |-- analytics.py               # Risk and forecast training
 |   |-- services.py                # Query, node-detail, and scenario service layer
 |   |-- health.py                  # End-to-end runtime health checks
-|   `-- ui.py                      # PySide6 interface
+|   |-- web_api.py                 # FastAPI API, media upload, and live update channel
+|   `-- ui.py                      # Starts backend and frontend together
 |-- artifacts/
 |   |-- report_assets/             # Exported report figures
 |   `-- ui_captures_native/        # Demonstration screenshots, including product_shelf_media_slots.png
@@ -128,10 +131,36 @@ Run the health check:
 python .\manage.py health-check
 ```
 
-Start the desktop application:
+Install frontend dependencies:
+
+```powershell
+cd .\web
+npm install
+cd ..
+```
+
+Start the browser application:
 
 ```powershell
 python .\app.py
+```
+
+This launches:
+
+- Customer frontend: http://127.0.0.1:5173/
+- Merchant backend console: http://127.0.0.1:5173/admin
+- API documentation: http://127.0.0.1:8000/docs
+
+You can also run the two layers manually in separate terminals:
+
+```powershell
+$env:PYTHONPATH = ".\src"
+python -m uvicorn mesh_supply_chain.web_api:app --host 127.0.0.1 --port 8000 --reload
+```
+
+```powershell
+cd .\web
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 ## Final Presentation
@@ -139,7 +168,13 @@ python .\app.py
 The rebuilt ENT105TC deck is available at:
 
 ```text
-outputs/oasis-finder-group9-ent105tc-rebuild-v2/output.pptx
+outputs/oasis-finder-group9-ent105tc-web-v3/output.pptx
 ```
 
-The deck includes the reframed questionnaire logic, CSV-backed charts, merchant value argument, clickable node-detail product proof, GitHub/open-source evidence, merchant A/B test validation plan, and APA-style source links.
+The matching read-aloud script is available at:
+
+```text
+outputs/oasis-finder-group9-ent105tc-web-v3/speaker_script_web_v3_Rui_Zixiu.pdf
+```
+
+The deck includes the reframed questionnaire logic, merchant value argument, browser frontend/backend workflow, screenshots, GitHub/open-source evidence, data-responsibility notes, and an eight-minute Rui Huang / Zixiu Wang speaker plan.
