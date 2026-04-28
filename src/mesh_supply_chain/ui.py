@@ -80,7 +80,14 @@ class WebServerThread(QThread):
 
             from .web_api import app
 
-            config = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning", access_log=False)
+            config = uvicorn.Config(
+                app,
+                host=HOST,
+                port=PORT,
+                log_level="warning",
+                access_log=False,
+                log_config=None,
+            )
             self.server = uvicorn.Server(config)
             self.ready.emit()
             self.server.run()
